@@ -1,5 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
-import { AppUser } from '../types';
+import {
+  AppUser,
+  Company,
+  Branch,
+  Seller,
+  SaleRecord,
+  MonthlyMasterGoal,
+} from '../types';
 
 const SUPABASE_URL =
   ((typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_URL) ||
@@ -52,6 +59,10 @@ CREATE TABLE IF NOT EXISTS gmc_users (
 
 CREATE TABLE IF NOT EXISTS gmc_companies (
   id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  trade_name TEXT,
+  document TEXT,
+  segment TEXT,
   data JSONB NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -60,6 +71,7 @@ CREATE TABLE IF NOT EXISTS gmc_companies (
 CREATE TABLE IF NOT EXISTS gmc_branches (
   id TEXT PRIMARY KEY,
   company_id TEXT NOT NULL,
+  name TEXT NOT NULL,
   data JSONB NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -68,6 +80,7 @@ CREATE TABLE IF NOT EXISTS gmc_sellers (
   id TEXT PRIMARY KEY,
   company_id TEXT NOT NULL,
   branch_id TEXT NOT NULL,
+  name TEXT NOT NULL,
   data JSONB NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -75,7 +88,7 @@ CREATE TABLE IF NOT EXISTS gmc_sellers (
 CREATE TABLE IF NOT EXISTS gmc_sales (
   id TEXT PRIMARY KEY,
   company_id TEXT NOT NULL,
-  seller_id TEXT NOT NULL,
+  seller_id TEXT,
   data JSONB NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -83,6 +96,7 @@ CREATE TABLE IF NOT EXISTS gmc_sales (
 CREATE TABLE IF NOT EXISTS gmc_master_goals (
   id TEXT PRIMARY KEY,
   company_id TEXT NOT NULL,
+  branch_id TEXT NOT NULL,
   data JSONB NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -172,6 +186,234 @@ export async function deleteUserFromSupabase(userId: string): Promise<boolean> {
     return true;
   } catch (err) {
     console.warn('Supabase offline ao excluir usuário.', err);
+    return false;
+  }
+}
+
+/**
+ * Sincronização de Empresas (Companies) no Supabase
+ */
+export async function syncCompanyToSupabase(company: Company): Promise<boolean> {
+  try {
+    const { error } = await supabase.from(SUPABASE_TABLES.COMPANIES).upsert(
+      {
+        id: company.id,
+        name: company.name,
+        trade_name: company.tradeName,
+        document: company.document || null,
+        segment: company.segment || null,
+        data: company,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' }
+    );
+    if (error) {
+      console.warn('Supabase company sync warning:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Supabase company sync offline.', err);
+    return false;
+  }
+}
+
+export async function fetchCompaniesFromSupabase(): Promise<Company[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from(SUPABASE_TABLES.COMPANIES)
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error || !data || data.length === 0) return null;
+    return data.map((row: any) => row.data as Company);
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteCompanyFromSupabase(companyId: string): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from(SUPABASE_TABLES.COMPANIES)
+      .delete()
+      .eq('id', companyId);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Sincronização de Filiais (Branches) no Supabase
+ */
+export async function syncBranchToSupabase(branch: Branch): Promise<boolean> {
+  try {
+    const { error } = await supabase.from(SUPABASE_TABLES.BRANCHES).upsert(
+      {
+        id: branch.id,
+        company_id: branch.companyId,
+        name: branch.name,
+        data: branch,
+      },
+      { onConflict: 'id' }
+    );
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchBranchesFromSupabase(): Promise<Branch[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from(SUPABASE_TABLES.BRANCHES)
+      .select('*')
+      .order('created_at', { ascending: true });
+    if (error || !data || data.length === 0) return null;
+    return data.map((row: any) => row.data as Branch);
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteBranchFromSupabase(branchId: string): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from(SUPABASE_TABLES.BRANCHES)
+      .delete()
+      .eq('id', branchId);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Sincronização de Vendedores (Sellers) no Supabase
+ */
+export async function syncSellerToSupabase(seller: Seller): Promise<boolean> {
+  try {
+    const { error } = await supabase.from(SUPABASE_TABLES.SELLERS).upsert(
+      {
+        id: seller.id,
+        company_id: seller.companyId,
+        branch_id: seller.branchId,
+        name: seller.name,
+        data: seller,
+      },
+      { onConflict: 'id' }
+    );
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchSellersFromSupabase(): Promise<Seller[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from(SUPABASE_TABLES.SELLERS)
+      .select('*')
+      .order('created_at', { ascending: true });
+    if (error || !data || data.length === 0) return null;
+    return data.map((row: any) => row.data as Seller);
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteSellerFromSupabase(sellerId: string): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from(SUPABASE_TABLES.SELLERS)
+      .delete()
+      .eq('id', sellerId);
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Sincronização de Metas Mestre (Master Goals) no Supabase
+ */
+export async function syncMasterGoalToSupabase(goal: MonthlyMasterGoal): Promise<boolean> {
+  try {
+    const { error } = await supabase.from(SUPABASE_TABLES.MASTER_GOALS).upsert(
+      {
+        id: goal.id,
+        company_id: goal.companyId,
+        branch_id: goal.branchId,
+        data: goal,
+      },
+      { onConflict: 'id' }
+    );
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchMasterGoalsFromSupabase(): Promise<Record<string, MonthlyMasterGoal> | null> {
+  try {
+    const { data, error } = await supabase
+      .from(SUPABASE_TABLES.MASTER_GOALS)
+      .select('*');
+    if (error || !data || data.length === 0) return null;
+    const map: Record<string, MonthlyMasterGoal> = {};
+    data.forEach((row: any) => {
+      const g = row.data as MonthlyMasterGoal;
+      const key = `${g.companyId}-${g.branchId}-${g.year}-${g.monthNumber}`;
+      map[key] = g;
+    });
+    return map;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sincronização de Lançamentos de Vendas (Sales) no Supabase
+ */
+export async function syncSaleToSupabase(sale: SaleRecord): Promise<boolean> {
+  try {
+    const { error } = await supabase.from(SUPABASE_TABLES.SALES).upsert(
+      {
+        id: sale.id,
+        company_id: sale.companyId,
+        seller_id: sale.sellerId || null,
+        data: sale,
+      },
+      { onConflict: 'id' }
+    );
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchSalesFromSupabase(): Promise<SaleRecord[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from(SUPABASE_TABLES.SALES)
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error || !data || data.length === 0) return null;
+    return data.map((row: any) => row.data as SaleRecord);
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteSaleFromSupabase(saleId: string): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from(SUPABASE_TABLES.SALES)
+      .delete()
+      .eq('id', saleId);
+    return !error;
+  } catch {
     return false;
   }
 }

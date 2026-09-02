@@ -65,6 +65,22 @@ import {
   validateTeamParticipation,
   redistributeTeamShares,
 } from '../services/masterGoalEngine';
+import {
+  syncCompanyToSupabase,
+  fetchCompaniesFromSupabase,
+  deleteCompanyFromSupabase,
+  syncBranchToSupabase,
+  fetchBranchesFromSupabase,
+  deleteBranchFromSupabase,
+  syncSellerToSupabase,
+  fetchSellersFromSupabase,
+  deleteSellerFromSupabase,
+  syncMasterGoalToSupabase,
+  fetchMasterGoalsFromSupabase,
+  syncSaleToSupabase,
+  fetchSalesFromSupabase,
+  deleteSaleFromSupabase,
+} from '../services/supabaseService';
 
 export type { ActiveView };
 
@@ -544,6 +560,70 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeSellerId, setActiveSellerId] = useState<string>('all');
   const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>([]);
 
+  // Sincronização inicial em background direto do Supabase (Nuvem)
+  useEffect(() => {
+    let isMounted = true;
+    async function loadCloudData() {
+      try {
+        const [cloudCompanies, cloudBranches, cloudSellers, cloudGoals, cloudSales] = await Promise.all([
+          fetchCompaniesFromSupabase(),
+          fetchBranchesFromSupabase(),
+          fetchSellersFromSupabase(),
+          fetchMasterGoalsFromSupabase(),
+          fetchSalesFromSupabase(),
+        ]);
+
+        if (!isMounted) return;
+
+        if (cloudCompanies && cloudCompanies.length > 0) {
+          setCompanies((prev) => {
+            const map = new Map<string, Company>();
+            prev.forEach((c) => map.set(c.id, c));
+            cloudCompanies.forEach((c) => map.set(c.id, c));
+            return Array.from(map.values());
+          });
+        }
+
+        if (cloudBranches && cloudBranches.length > 0) {
+          setBranches((prev) => {
+            const map = new Map<string, Branch>();
+            prev.forEach((b) => map.set(b.id, b));
+            cloudBranches.forEach((b) => map.set(b.id, b));
+            return Array.from(map.values());
+          });
+        }
+
+        if (cloudSellers && cloudSellers.length > 0) {
+          setSellers((prev) => {
+            const map = new Map<string, Seller>();
+            prev.forEach((s) => map.set(s.id, s));
+            cloudSellers.forEach((s) => map.set(s.id, s));
+            return Array.from(map.values());
+          });
+        }
+
+        if (cloudGoals && Object.keys(cloudGoals).length > 0) {
+          setMasterGoals((prev) => ({ ...prev, ...cloudGoals }));
+        }
+
+        if (cloudSales && cloudSales.length > 0) {
+          setSales((prev) => {
+            const map = new Map<string, SaleRecord>();
+            prev.forEach((s) => map.set(s.id, s));
+            cloudSales.forEach((s) => map.set(s.id, s));
+            return Array.from(map.values());
+          });
+        }
+      } catch (err) {
+        console.warn('Sincronização em background do Supabase:', err);
+      }
+    }
+    loadCloudData();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Sync to localStorage
   useEffect(() => {
     try {
@@ -976,24 +1056,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: companyData.createdAt || new Date().toISOString(),
     };
     setCompanies((prev) => [...prev, newCompany]);
+    syncCompanyToSupabase(newCompany);
 
     // Garante que a matriz seja criada imediatamente para esta nova empresa
+    const matrizBranch: Branch = {
+      id: `branch-${id}-matriz`,
+      companyId: id,
+      name: `${newCompany.tradeName || newCompany.name} - Matriz`,
+      type: 'headquarters',
+      active: true,
+    };
+
     setBranches((prev) => {
       const exists = prev.some((b) => b.companyId === id);
       if (!exists) {
-        return [
-          ...prev,
-          {
-            id: `branch-${id}-matriz`,
-            companyId: id,
-            name: `${newCompany.tradeName || newCompany.name} - Matriz`,
-            type: 'headquarters',
-            active: true,
-          },
-        ];
+        return [...prev, matrizBranch];
       }
       return prev;
     });
+    syncBranchToSupabase(matrizBranch);
 
     setActiveCompanyId(id);
     return id;
@@ -1001,7 +1082,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateCompany = (id: string, updates: Partial<Company>) => {
     setCompanies((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, ...updates } : c))
+      prev.map((c) => {
+        if (c.id === id) {
+          const updated = { ...c, ...updates };
+          syncCompanyToSupabase(updated);
+          return updated;
+        }
+        return c;
+      })
     );
   };
 
@@ -1014,6 +1102,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setBranches((prev) => prev.filter((b) => b.companyId !== id));
     setSellers((prev) => prev.filter((s) => s.companyId !== id));
     setSales((prev) => prev.filter((s) => s.companyId !== id));
+    deleteCompanyFromSupabase(id);
     const remaining = companies.filter((c) => c.id !== id);
     if (remaining.length > 0) {
       setActiveCompanyId(remaining[0].id);
@@ -1024,23 +1113,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const id = branchData.id || `branch-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
     const newBranch: Branch = { ...branchData, id };
     setBranches((prev) => [...prev, newBranch]);
+    syncBranchToSupabase(newBranch);
     return id;
   };
 
   const updateBranch = (id: string, updates: Partial<Branch>) => {
     setBranches((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, ...updates } : b))
+      prev.map((b) => {
+        if (b.id === id) {
+          const updated = { ...b, ...updates };
+          syncBranchToSupabase(updated);
+          return updated;
+        }
+        return b;
+      })
     );
   };
 
   const deleteBranch = (id: string) => {
     setBranches((prev) => prev.filter((b) => b.id !== id));
+    deleteBranchFromSupabase(id);
   };
 
   const addSeller = (sellerData: (Omit<Seller, 'id'> & { id?: string })): string => {
     const id = sellerData.id || `seller-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const newSeller: Seller = { ...sellerData, id };
     setSellers((prev) => [...prev, newSeller]);
+    syncSellerToSupabase(newSeller);
     return id;
   };
 
@@ -1052,17 +1151,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: `seller-${timestamp}-${index}-${Math.random().toString(36).substring(2, 6)}`,
     }));
     setSellers((prev) => [...prev, ...createdList]);
+    createdList.forEach((s) => syncSellerToSupabase(s));
     return createdList.length;
   };
 
   const updateSeller = (id: string, updates: Partial<Seller>) => {
     setSellers((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, ...updates } : s))
+      prev.map((s) => {
+        if (s.id === id) {
+          const updated = { ...s, ...updates };
+          syncSellerToSupabase(updated);
+          return updated;
+        }
+        return s;
+      })
     );
   };
 
   const deleteSeller = (id: string) => {
     setSellers((prev) => prev.filter((s) => s.id !== id));
+    deleteSellerFromSupabase(id);
   };
 
   const addSale = (saleData: Omit<SaleRecord, 'id' | 'createdAt'>): string => {
@@ -1073,17 +1181,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
     setSales((prev) => [...prev, newSale]);
+    syncSaleToSupabase(newSale);
     return id;
   };
 
   const updateSale = (id: string, updates: Partial<SaleRecord>) => {
     setSales((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, ...updates } : s))
+      prev.map((s) => {
+        if (s.id === id) {
+          const updated = { ...s, ...updates };
+          syncSaleToSupabase(updated);
+          return updated;
+        }
+        return s;
+      })
     );
   };
 
   const deleteSale = (id: string) => {
     setSales((prev) => prev.filter((s) => s.id !== id));
+    deleteSaleFromSupabase(id);
   };
 
   const batchAddSales = (newSales: Omit<SaleRecord, 'id' | 'createdAt'>[]): number => {
@@ -1094,6 +1211,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: now,
     }));
     setSales((prev) => [...prev, ...created]);
+    created.forEach((s) => syncSaleToSupabase(s));
     return created.length;
   };
 
@@ -1511,6 +1629,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updatedAt: new Date().toISOString(),
       },
     }));
+    syncMasterGoalToSupabase(goal);
   };
 
   /**
