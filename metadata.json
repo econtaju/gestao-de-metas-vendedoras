@@ -1,0 +1,8 @@
+{
+  "name": "Remix MetaRentável - Gestão de Metas e Rentabilidade",
+  "description": "Sistema executivo de planejamento e simulação de metas comerciais de 1 a 4 níveis, cálculo de comissões, margem de contribuição e margem incremental com consolidação matriz/filiais para consultores e gestores.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

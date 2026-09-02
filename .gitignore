@@ -1,0 +1,16 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+.vercel
+.vscode/
+app_build/
+production_artifacts/
+antigravity-skills-project-v2.2-PATCH/
+skills-codelab/
+.agents/
+INSTALL-PATCH.md

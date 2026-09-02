@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>MetaRentável - Gestão de Metas e Rentabilidade</title>
+    <meta name="description" content="Sistema executivo de planejamento e simulação de metas comerciais, comissões, margem de contribuição e inteligência histórica." />
+    <meta property="og:title" content="MetaRentável - Gestão de Metas e Rentabilidade" />
+    <meta property="og:description" content="Sistema executivo de planejamento e simulação de metas comerciais, comissões e rentabilidade." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      (function() {
+        try {
+          // DESREGISTRO TOTAL DE SERVICE WORKERS LEGADOS
+          if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(registrations) {
+              for (var i = 0; i < registrations.length; i++) {
+                registrations[i].unregister();
+              }
+            });
+          }
+
+          // LIMPEZA DE CACHESTORAGE DO NAVEGADOR
+          if (typeof window !== 'undefined' && 'caches' in window) {
+            caches.keys().then(function(names) {
+              for (var j = 0; j < names.length; j++) {
+                caches.delete(names[j]);
+              }
+            });
+          }
+
+          // FORÇA LIMPEZA DE CACHE E RESET PARA EXIGIR LOGIN
+          var BUILD_VERSION = 'gmc_build_v6_force_login_auth_2026';
+          if (typeof localStorage !== 'undefined') {
+            var current = localStorage.getItem('gmc_clean_version');
+            if (current !== BUILD_VERSION) {
+              localStorage.removeItem('gmc_auth_session_v2');
+              localStorage.removeItem('gmc_auth_session');
+              localStorage.setItem('gmc_clean_version', BUILD_VERSION);
+            }
+          }
+        } catch (e) {}
+
+        try {
+          const originalFetch = typeof window !== 'undefined' && window.fetch ? window.fetch.bind(window) : undefined;
+          let currentFetch = originalFetch;
+          Object.defineProperty(window, 'fetch', {
+            get() {
+              return currentFetch;
+            },
+            set(fn) {
+              currentFetch = fn;
+            },
+            configurable: true,
+            enumerable: true,
+          });
+        } catch (e) {
+          // Graceful fallback
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
