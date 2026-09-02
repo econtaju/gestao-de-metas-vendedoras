@@ -25,6 +25,13 @@ import {
   Zap,
   BookmarkPlus,
   Award,
+  Edit2,
+  Save,
+  Settings2,
+  ArrowUpRight,
+  HelpCircle,
+  X,
+  AlertTriangle,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { WeeklyWeightSelector } from './WeeklyWeightSelector';
@@ -38,6 +45,7 @@ import {
   CommercialWeekPeriod,
   WeeklyWeightTemplate,
   GoalSimulationScenario,
+  GoalLevel,
 } from '../../types';
 import {
   buildCommercialWeeks,
@@ -102,6 +110,52 @@ export const GoalGenerator: React.FC = () => {
     return existingMaster?.monthlyTarget || activeCompany.levels[0]?.revenueTarget || 0;
   });
 
+  const [monthlyTargetInput, setMonthlyTargetInput] = useState<string>(() => {
+    const val = existingMaster?.monthlyTarget || activeCompany.levels[0]?.revenueTarget || 0;
+    return val > 0 ? val.toString() : '';
+  });
+
+  // Padrão de crescimento percentual da escada de metas (ex: Meta 1: Base, Meta 2: +15%, Meta 3: +10%, Meta 4: +10%)
+  const [levelGrowthRates, setLevelGrowthRates] = useState<number[]>(() => {
+    if (existingMaster?.levelGrowthPercentages && existingMaster.levelGrowthPercentages.length >= 4) {
+      return existingMaster.levelGrowthPercentages;
+    }
+    if (activeCompany.levelGrowthPercentages && activeCompany.levelGrowthPercentages.length >= 4) {
+      return activeCompany.levelGrowthPercentages;
+    }
+    return [0, 15, 10, 10];
+  });
+
+  // Valores manuais sobrescritos pelo usuário em Metas 2, 3 ou 4
+  const [manualLevelValues, setManualLevelValues] = useState<Record<number, number>>(() => {
+    if (existingMaster?.levels && existingMaster.levels.length > 0) {
+      const map: Record<number, number> = {};
+      existingMaster.levels.forEach((lvl, idx) => {
+        if (idx > 0) map[idx] = lvl.revenueTarget;
+      });
+      return map;
+    }
+    return {};
+  });
+
+  // Modal para confirmação de edição manual com duplo-clique
+  const [editingLevelModal, setEditingLevelModal] = useState<{
+    isOpen: boolean;
+    levelIndex: number;
+    levelName: string;
+    currentValue: number;
+    inputValue: string;
+  }>({
+    isOpen: false,
+    levelIndex: 1,
+    levelName: '',
+    currentValue: 0,
+    inputValue: '',
+  });
+
+  // Controle de exibição da configuração da escada
+  const [isGrowthConfigOpen, setIsGrowthConfigOpen] = useState(false);
+
   const [numberOfWeeks, setNumberOfWeeks] = useState<4 | 5>(() => {
     return existingMaster?.numberOfWeeks || 4;
   });
@@ -121,19 +175,87 @@ export const GoalGenerator: React.FC = () => {
   const [isSimulatorOpen, setIsSimulatorOpen] = useState<boolean>(false);
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
 
-  // Sincroniza dados sempre que o Mês, Ano, Unidade ou masterGoals mudar
+  // Níveis calculados dinamicamente com base na Meta 1 e na Escada de Crescimento
+  const calculatedLevels = useMemo((): GoalLevel[] => {
+    const numLevels = activeCompany.numberOfLevels || 4;
+    const result: GoalLevel[] = [];
+
+    // Nível 1: Sempre o monthlyTarget
+    const lvl1Target = monthlyTarget;
+    result.push({
+      level: 1,
+      name: activeCompany.levels[0]?.name || 'Meta 1',
+      revenueTarget: lvl1Target,
+      commissionPercentage: activeCompany.levels[0]?.commissionPercentage ?? 1.0,
+    });
+
+    // Nível 2
+    if (numLevels >= 2) {
+      const autoLvl2 = Math.round(lvl1Target * (1 + (levelGrowthRates[1] ?? 15) / 100));
+      const lvl2Target = manualLevelValues[1] !== undefined ? manualLevelValues[1] : autoLvl2;
+      result.push({
+        level: 2,
+        name: activeCompany.levels[1]?.name || 'Meta 2',
+        revenueTarget: lvl2Target,
+        commissionPercentage: activeCompany.levels[1]?.commissionPercentage ?? 1.5,
+      });
+    }
+
+    // Nível 3
+    if (numLevels >= 3) {
+      const prevTarget = result[1]?.revenueTarget || lvl1Target;
+      const autoLvl3 = Math.round(prevTarget * (1 + (levelGrowthRates[2] ?? 10) / 100));
+      const lvl3Target = manualLevelValues[2] !== undefined ? manualLevelValues[2] : autoLvl3;
+      result.push({
+        level: 3,
+        name: activeCompany.levels[2]?.name || 'Meta 3',
+        revenueTarget: lvl3Target,
+        commissionPercentage: activeCompany.levels[2]?.commissionPercentage ?? 2.0,
+      });
+    }
+
+    // Nível 4
+    if (numLevels >= 4) {
+      const prevTarget = result[2]?.revenueTarget || result[1]?.revenueTarget || lvl1Target;
+      const autoLvl4 = Math.round(prevTarget * (1 + (levelGrowthRates[3] ?? 10) / 100));
+      const lvl4Target = manualLevelValues[3] !== undefined ? manualLevelValues[3] : autoLvl4;
+      result.push({
+        level: 4,
+        name: activeCompany.levels[3]?.name || 'Meta 4',
+        revenueTarget: lvl4Target,
+        commissionPercentage: activeCompany.levels[3]?.commissionPercentage ?? 2.5,
+      });
+    }
+
+    return result;
+  }, [monthlyTarget, levelGrowthRates, manualLevelValues, activeCompany]);
+
+  // Sincroniza dados sempre que o Mês, Ano ou Unidade mudar
   useEffect(() => {
     const key = `${activeCompany.id}-${selectedBranchId}-${selectedYear}-${selectedMonthNumber}`;
     const currentMaster = masterGoals[key];
     if (currentMaster) {
       setMonthlyTarget(currentMaster.monthlyTarget);
+      setMonthlyTargetInput(currentMaster.monthlyTarget > 0 ? currentMaster.monthlyTarget.toString() : '');
       setNumberOfWeeks(currentMaster.numberOfWeeks);
       setWeeks(currentMaster.weeks);
       setSelectedTemplateId(currentMaster.templateUsed);
+      if (currentMaster.levelGrowthPercentages && currentMaster.levelGrowthPercentages.length >= 4) {
+        setLevelGrowthRates(currentMaster.levelGrowthPercentages);
+      }
+      if (currentMaster.levels && currentMaster.levels.length > 0) {
+        const map: Record<number, number> = {};
+        currentMaster.levels.forEach((lvl, idx) => {
+          if (idx > 0) map[idx] = lvl.revenueTarget;
+        });
+        setManualLevelValues(map);
+      } else {
+        setManualLevelValues({});
+      }
     } else {
-      // Valor base sugerido para o mês
       const baseTarget = activeCompany.levels[0]?.revenueTarget || 0;
       setMonthlyTarget(baseTarget);
+      setMonthlyTargetInput(baseTarget > 0 ? baseTarget.toString() : '');
       const defaultWeights = [15, 20, 25, 40];
       setNumberOfWeeks(4);
       const newWeeks = buildCommercialWeeks(
@@ -145,10 +267,16 @@ export const GoalGenerator: React.FC = () => {
       );
       setWeeks(newWeeks);
       setSelectedTemplateId(undefined);
+      setManualLevelValues({});
+      if (activeCompany.levelGrowthPercentages && activeCompany.levelGrowthPercentages.length >= 4) {
+        setLevelGrowthRates(activeCompany.levelGrowthPercentages);
+      } else {
+        setLevelGrowthRates([0, 15, 10, 10]);
+      }
     }
-  }, [selectedMonthNumber, selectedYear, selectedBranchId, activeCompany.id, masterGoals]);
+  }, [selectedMonthNumber, selectedYear, selectedBranchId, activeCompany.id]);
 
-  // Auto-salvar rascunho com debounce de 800ms sempre que houver mudanças locais
+  // Auto-salvar rascunho com debounce de 800ms
   useEffect(() => {
     const delayDebounceId = setTimeout(() => {
       const monthNames = [
@@ -173,26 +301,88 @@ export const GoalGenerator: React.FC = () => {
         templateUsed: selectedTemplateId,
         commissionRuleType: 'monthly',
         status: existingMaster?.status || 'draft',
+        levels: calculatedLevels,
+        levelGrowthPercentages: levelGrowthRates,
         updatedAt: new Date().toISOString(),
       };
 
       const key = `${activeCompany.id}-${selectedBranchId}-${selectedYear}-${selectedMonthNumber}`;
       const currentGlobal = masterGoals[key];
 
-      // Só executa o salvamento se houver uma diferença real para evitar loops infinitos
       if (
         !currentGlobal ||
         currentGlobal.monthlyTarget !== monthlyTarget ||
         JSON.stringify(currentGlobal.weeks) !== JSON.stringify(weeks) ||
         currentGlobal.numberOfWeeks !== numberOfWeeks ||
-        currentGlobal.templateUsed !== selectedTemplateId
+        currentGlobal.templateUsed !== selectedTemplateId ||
+        JSON.stringify(currentGlobal.levels) !== JSON.stringify(calculatedLevels)
       ) {
         saveMasterGoal(masterGoalToSave);
       }
     }, 800);
 
     return () => clearTimeout(delayDebounceId);
-  }, [monthlyTarget, weeks, numberOfWeeks, selectedTemplateId, selectedMonthNumber, selectedYear, selectedBranchId, activeCompany.id]);
+  }, [monthlyTarget, weeks, numberOfWeeks, selectedTemplateId, selectedMonthNumber, selectedYear, selectedBranchId, activeCompany.id, calculatedLevels, levelGrowthRates]);
+
+  const handleMonthlyTargetChange = (val: number) => {
+    const safeVal = Math.max(0, Math.round(val));
+    setMonthlyTarget(safeVal);
+    setMonthlyTargetInput(safeVal > 0 ? safeVal.toString() : '');
+    // Regra do usuário: Se editar novamente o inicial, reajusta as demais automaticamente pelas porcentagens padrão!
+    setManualLevelValues({});
+    setWeeks((prev) =>
+      prev.map((w) => ({
+        ...w,
+        revenueTarget: Math.round(safeVal * (w.weightPercentage / 100)),
+        targetAmount: Math.round(safeVal * (w.weightPercentage / 100)),
+      }))
+    );
+  };
+
+  const handleOpenEditLevel = (levelIndex: number) => {
+    const targetLvl = calculatedLevels[levelIndex];
+    if (!targetLvl) return;
+    setEditingLevelModal({
+      isOpen: true,
+      levelIndex,
+      levelName: targetLvl.name,
+      currentValue: targetLvl.revenueTarget,
+      inputValue: targetLvl.revenueTarget.toString(),
+    });
+  };
+
+  const handleConfirmEditLevel = () => {
+    const cleanNum = parseFloat(editingLevelModal.inputValue.replace(/\D/g, '')) || 0;
+    if (cleanNum <= 0) {
+      alert('Por favor, informe um valor de meta maior que zero.');
+      return;
+    }
+    setManualLevelValues((prev) => ({
+      ...prev,
+      [editingLevelModal.levelIndex]: cleanNum,
+    }));
+    setEditingLevelModal((prev) => ({ ...prev, isOpen: false }));
+    setSaveSuccessMessage(`${editingLevelModal.levelName} ajustada manualmente para ${formatCurrency(cleanNum)}!`);
+    setTimeout(() => setSaveSuccessMessage(null), 3500);
+  };
+
+  const handleGrowthRateChange = (levelIdx: number, newRate: number) => {
+    setLevelGrowthRates((prev) => {
+      const next = [...prev];
+      next[levelIdx] = Math.max(0, newRate);
+      return next;
+    });
+    // Limpa edições manuais para recalcular com a nova regra de escada
+    setManualLevelValues({});
+  };
+
+  const handleSaveGrowthRatesAsCompanyDefault = () => {
+    updateCompany(activeCompany.id, {
+      levelGrowthPercentages: levelGrowthRates,
+    });
+    setSaveSuccessMessage('Padrão de evolução de metas salvo com sucesso para toda a empresa!');
+    setTimeout(() => setSaveSuccessMessage(null), 3500);
+  };
 
   // Atualiza semanas quando o número de semanas muda
   const handleWeeksCountChange = (newCount: 4 | 5) => {
@@ -219,17 +409,6 @@ export const GoalGenerator: React.FC = () => {
       monthlyTarget
     );
     setWeeks(newWeeks);
-  };
-
-  const handleMonthlyTargetChange = (val: number) => {
-    setMonthlyTarget(val);
-    setWeeks((prev) =>
-      prev.map((w) => ({
-        ...w,
-        revenueTarget: Math.round(val * (w.weightPercentage / 100)),
-        targetAmount: Math.round(val * (w.weightPercentage / 100)),
-      }))
-    );
   };
 
   // Atualiza peso de uma semana específica
@@ -605,10 +784,10 @@ export const GoalGenerator: React.FC = () => {
             </span>
             <div>
               <h2 className="text-base font-bold text-slate-900">
-                Meta Mensal da Unidade (Fonte Principal da Verdade)
+                Meta Mensal da Unidade (Meta 1 / Base Oficial)
               </h2>
               <p className="text-xs text-slate-500">
-                Defina o valor consolidado da loja para o mês. As semanas e vendedores serão calculados a partir deste número.
+                Defina o valor base consolidado da loja para o mês. As demais metas (2, 3 e 4) e as semanas serão calculadas automaticamente a partir deste número.
               </p>
             </div>
           </div>
@@ -619,20 +798,32 @@ export const GoalGenerator: React.FC = () => {
             <div className="relative flex items-center gap-2">
               <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400">R$</span>
               <input
-                type="number"
-                step="5000"
-                value={monthlyTarget}
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value) || 0;
-                  handleMonthlyTargetChange(val);
+                type="text"
+                value={monthlyTargetInput}
+                onChange={(e) => setMonthlyTargetInput(e.target.value)}
+                onBlur={() => {
+                  const clean = parseFloat(monthlyTargetInput.replace(/\D/g, '')) || 0;
+                  handleMonthlyTargetChange(clean);
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const clean = parseFloat(monthlyTargetInput.replace(/\D/g, '')) || 0;
+                    handleMonthlyTargetChange(clean);
+                  }
+                }}
+                placeholder="0"
                 className="w-44 pl-9 pr-3 py-2 text-sm font-mono font-bold text-slate-900 bg-white border-2 border-indigo-200 rounded-xl focus:border-indigo-600 focus:outline-none shadow-sm"
               />
               <button
                 type="button"
-                onClick={handleSaveDraft}
-                className="px-3.5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition shadow-sm whitespace-nowrap"
+                onClick={() => {
+                  const clean = parseFloat(monthlyTargetInput.replace(/\D/g, '')) || 0;
+                  handleMonthlyTargetChange(clean);
+                  handleSaveDraft();
+                }}
+                className="px-3.5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition shadow-sm whitespace-nowrap cursor-pointer flex items-center gap-1.5"
               >
+                <Save className="w-3.5 h-3.5" />
                 Salvar Rascunho
               </button>
             </div>
@@ -640,50 +831,147 @@ export const GoalGenerator: React.FC = () => {
         </div>
 
         {/* Atalhos Rápidos de Meta Mensal */}
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-slate-500 text-xs font-medium">Ajustes Rápidos:</span>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-slate-500 text-xs font-medium">Ajustes Rápidos:</span>
+            <button
+              type="button"
+              onClick={() => {
+                const val = Math.round(monthlyTarget * 1.05);
+                handleMonthlyTargetChange(val);
+              }}
+              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-semibold transition-colors cursor-pointer"
+            >
+              +5% Crescimento
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const val = Math.round(monthlyTarget * 1.1);
+                handleMonthlyTargetChange(val);
+              }}
+              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-semibold transition-colors cursor-pointer"
+            >
+              +10% Crescimento
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const val = Math.round(monthlyTarget * 1.15);
+                handleMonthlyTargetChange(val);
+              }}
+              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-semibold transition-colors cursor-pointer"
+            >
+              +15% Crescimento
+            </button>
+            <button
+              type="button"
+              onClick={() => handleMonthlyTargetChange(0)}
+              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-semibold transition-colors cursor-pointer"
+            >
+              Zerar Meta
+            </button>
+          </div>
+
+          {/* Botão para abrir configuração de escada */}
           <button
             type="button"
-            onClick={() => {
-              const val = Math.round(monthlyTarget * 1.05);
-              handleMonthlyTargetChange(val);
-            }}
-            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-semibold transition-colors"
+            onClick={() => setIsGrowthConfigOpen(!isGrowthConfigOpen)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition cursor-pointer"
           >
-            +5% Crescimento
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const val = Math.round(monthlyTarget * 1.1);
-              handleMonthlyTargetChange(val);
-            }}
-            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-semibold transition-colors"
-          >
-            +10% Crescimento
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const val = Math.round(monthlyTarget * 1.15);
-              handleMonthlyTargetChange(val);
-            }}
-            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-semibold transition-colors"
-          >
-            +15% Crescimento
-          </button>
-          <button
-            type="button"
-            onClick={() => handleMonthlyTargetChange(0)}
-            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-semibold transition-colors"
-          >
-            Zerar Meta
+            <Sliders className="w-3.5 h-3.5 text-indigo-600" />
+            <span>{isGrowthConfigOpen ? 'Fechar Configuração da Escada' : 'Configurar Evolução de Metas (%)'}</span>
           </button>
         </div>
 
+        {/* Painel Expansível de Configuração da Escada de Metas */}
+        {isGrowthConfigOpen && (
+          <div className="mt-4 p-4 bg-indigo-50/50 border border-indigo-200 rounded-xl space-y-3 animate-fadeIn">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h4 className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-indigo-600" />
+                  Padrão de Evolução de Metas (Crescimento entre Níveis)
+                </h4>
+                <p className="text-[11px] text-indigo-700 mt-0.5">
+                  Defina a porcentagem que cada meta sobe em cima da anterior. Ao alterar a Meta 1, todas as demais serão calculadas automaticamente por este padrão:
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveGrowthRatesAsCompanyDefault}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer flex items-center gap-1 shrink-0"
+              >
+                <Save className="w-3.5 h-3.5" />
+                Salvar como Padrão da Empresa
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+              <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-xs">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[11px] font-bold text-slate-700">Meta 1 ➔ Meta 2</span>
+                  <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-800 rounded font-semibold">+% s/ Meta 1</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    step="1"
+                    value={levelGrowthRates[1] || 15}
+                    onChange={(e) => handleGrowthRateChange(1, parseFloat(e.target.value) || 0)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 text-sm font-bold text-slate-900"
+                  />
+                  <span className="text-xs font-bold text-slate-600">%</span>
+                </div>
+              </div>
+
+              <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-xs">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[11px] font-bold text-slate-700">Meta 2 ➔ Meta 3</span>
+                  <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-800 rounded font-semibold">+% s/ Meta 2</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    step="1"
+                    value={levelGrowthRates[2] || 10}
+                    onChange={(e) => handleGrowthRateChange(2, parseFloat(e.target.value) || 0)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 text-sm font-bold text-slate-900"
+                  />
+                  <span className="text-xs font-bold text-slate-600">%</span>
+                </div>
+              </div>
+
+              <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-xs">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[11px] font-bold text-slate-700">Meta 3 ➔ Meta 4</span>
+                  <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded font-semibold">+% s/ Meta 3</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    step="1"
+                    value={levelGrowthRates[3] || 10}
+                    onChange={(e) => handleGrowthRateChange(3, parseFloat(e.target.value) || 0)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 text-sm font-bold text-slate-900"
+                  />
+                  <span className="text-xs font-bold text-slate-600">%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Níveis de Metas Proporcionais do Mês Selecionado */}
         <div className="mt-5 pt-4 border-t border-slate-100">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
             <div className="flex items-center gap-2">
               <Award className="w-4 h-4 text-emerald-600" />
               <span className="text-xs font-bold text-slate-800">
@@ -691,29 +979,29 @@ export const GoalGenerator: React.FC = () => {
               </span>
             </div>
             <span className="text-[11px] text-slate-500 font-medium">
-              Alíquotas configuradas na empresa ({activeCompany.numberOfLevels} Níveis ativos)
+              💡 Dê <strong>dois cliques</strong> em qualquer meta para editar o valor manualmente.
             </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {activeCompany.levels.slice(0, activeCompany.numberOfLevels).map((lvl, idx) => {
-              // Proporção de crescimento em relação ao nível 1
-              const baseLevel1 = activeCompany.levels[0]?.revenueTarget || 1;
-              const ratio = lvl.revenueTarget / baseLevel1;
-              const levelTarget = Math.round(monthlyTarget * (idx === 0 ? 1 : ratio));
-              const estimatedCommission = Math.round(levelTarget * (lvl.commissionPercentage / 100));
+            {calculatedLevels.map((lvl, idx) => {
+              const estimatedCommission = Math.round(lvl.revenueTarget * (lvl.commissionPercentage / 100));
+              const isManual = idx > 0 && manualLevelValues[idx] !== undefined;
+              const growthPercent = idx === 0 ? 0 : levelGrowthRates[idx] || 0;
 
               return (
                 <div
                   key={lvl.level}
-                  className={`p-3.5 rounded-xl border transition-all ${
+                  onDoubleClick={() => handleOpenEditLevel(idx)}
+                  title="Dê dois cliques para editar o valor desta meta manualmente"
+                  className={`p-3.5 rounded-xl border transition-all cursor-pointer relative group select-none hover:shadow-md ${
                     idx === 0
-                      ? 'bg-emerald-50/70 border-emerald-200'
+                      ? 'bg-emerald-50/80 border-emerald-300 hover:border-emerald-400'
                       : idx === 1
-                      ? 'bg-blue-50/70 border-blue-200'
+                      ? 'bg-blue-50/80 border-blue-300 hover:border-blue-400'
                       : idx === 2
-                      ? 'bg-purple-50/70 border-purple-200'
-                      : 'bg-amber-50/70 border-amber-200'
+                      ? 'bg-purple-50/80 border-purple-300 hover:border-purple-400'
+                      : 'bg-amber-50/80 border-amber-300 hover:border-amber-400'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1.5">
@@ -721,16 +1009,40 @@ export const GoalGenerator: React.FC = () => {
                       <span className="w-2 h-2 rounded-full bg-slate-700" />
                       {lvl.name}
                     </span>
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">
-                      {lvl.commissionPercentage}% Comiss.
-                    </span>
+                    <div className="flex items-center gap-1">
+                      {isManual ? (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                          ✏️ Manual
+                        </span>
+                      ) : idx > 0 ? (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-white/80 text-slate-600 border border-slate-200">
+                          +{growthPercent}%
+                        </span>
+                      ) : null}
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">
+                        {lvl.commissionPercentage}%
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="text-sm font-bold font-mono text-slate-900">
-                    {formatCurrency(levelTarget)}
+                  <div className="flex items-center justify-between">
+                    <div className="text-base font-bold font-mono text-slate-900 tracking-tight">
+                      {formatCurrency(lvl.revenueTarget)}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenEditLevel(idx);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 transition p-1 bg-white/90 hover:bg-white text-slate-600 hover:text-slate-900 rounded-lg shadow-xs border border-slate-200 cursor-pointer"
+                      title="Editar valor manualmente"
+                    >
+                      <Edit2 className="w-3 h-3" />
+                    </button>
                   </div>
 
-                  <div className="text-[11px] text-slate-600 mt-1 flex justify-between">
+                  <div className="text-[11px] text-slate-600 mt-1.5 flex justify-between pt-1 border-t border-slate-200/60">
                     <span>Prêmio Equipe:</span>
                     <strong className="text-slate-900">{formatCurrency(estimatedCommission)}</strong>
                   </div>
@@ -863,6 +1175,94 @@ export const GoalGenerator: React.FC = () => {
             setTimeout(() => setSaveSuccessMessage(null), 4000);
           }}
         />
+      )}
+
+      {/* Modal de Confirmação de Edição Manual de Nível de Meta */}
+      {editingLevelModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                  <Edit2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Editar {editingLevelModal.levelName}
+                  </h3>
+                  <span className="text-xs text-slate-500">
+                    Ajuste manual com confirmação
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingLevelModal((prev) => ({ ...prev, isOpen: false }))}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2">
+              <div className="flex justify-between">
+                <span className="text-slate-600">Valor Atual Calculado:</span>
+                <strong className="font-mono text-slate-900">{formatCurrency(editingLevelModal.currentValue)}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-600">Mês de Aplicação:</span>
+                <span className="font-semibold text-slate-800">{ALL_MONTHS.find((m) => m.number === selectedMonthNumber)?.name}/{selectedYear}</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Novo Valor Desejado para a {editingLevelModal.levelName}:
+              </label>
+              <div className="relative">
+                <span className="absolute left-3.5 top-2.5 text-xs font-bold text-slate-400">R$</span>
+                <input
+                  type="text"
+                  autoFocus
+                  value={editingLevelModal.inputValue}
+                  onChange={(e) => {
+                    const clean = e.target.value;
+                    setEditingLevelModal((prev) => ({ ...prev, inputValue: clean }));
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleConfirmEditLevel();
+                  }}
+                  className="w-full pl-10 pr-3 py-2 text-sm font-mono font-bold text-slate-900 bg-white border-2 border-indigo-200 rounded-xl focus:border-indigo-600 focus:outline-none shadow-xs"
+                />
+              </div>
+            </div>
+
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-900">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <span>
+                <strong>Confirmação Necessária:</strong> Este valor substituirá o cálculo automático para a {editingLevelModal.levelName}. Caso você altere a Meta 1 inicial novamente, os níveis voltarão a se ajustar pela regra percentual padrão.
+              </span>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditingLevelModal((prev) => ({ ...prev, isOpen: false }))}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmEditLevel}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 transition cursor-pointer flex items-center gap-1.5"
+              >
+                <Check className="w-4 h-4" />
+                Confirmar Novo Valor
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

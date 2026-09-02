@@ -164,7 +164,7 @@ export const SellerPortalView: React.FC = () => {
   const progressColor = achievement >= 100 ? '#10b981' : achievement >= 70 ? '#3b82f6' : '#f59e0b';
 
   // --- SUGESTÃO 1: SIMULADOR QUANTO FALTA PARA O PRÓXIMO NÍVEL ---
-  const currentTicket = goalDetail?.currentAverageTicket || 350;
+  const currentTicket = goalDetail?.averageTicket || goalDetail?.currentMonthAverageTicket || 350;
   const activeTicketToUse = simulatedTicket ?? currentTicket;
   const requiredSalesNextLevel = activeTicketToUse > 0 ? Math.ceil(remaining / activeTicketToUse) : 0;
   

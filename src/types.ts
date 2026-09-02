@@ -61,6 +61,7 @@ export interface Company {
   goalScenario: GoalScenarioType; // 'individual' | 'general' | 'both'
   commissionRuleType?: 'monthly' | 'weekly'; // Regra A — Comissão mensal vs Regra B — Comissão semanal
   levels: GoalLevel[];
+  levelGrowthPercentages?: number[]; // Padrão de crescimento entre níveis (ex: [0, 15, 10, 10])
   financialSettings: FinancialSettings;
   notes?: string;
   active: boolean;
@@ -596,6 +597,8 @@ export interface MonthlyMasterGoal {
   templateUsed?: string;
   commissionRuleType: 'monthly' | 'weekly';
   status: 'draft' | 'published';
+  levels?: GoalLevel[];
+  levelGrowthPercentages?: number[];
   publishedAt?: string;
   updatedAt: string;
 }

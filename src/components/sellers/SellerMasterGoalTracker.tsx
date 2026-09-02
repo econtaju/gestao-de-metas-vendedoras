@@ -161,8 +161,8 @@ export const SellerMasterGoalTracker: React.FC<SellerMasterGoalTrackerProps> = (
 
         <div className="p-4 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {weeklyList.map((week) => {
-              const weekTarget = week.revenueTarget || 0;
+            {weeklyList.map((week: any) => {
+              const weekTarget = week.targetAmount ?? week.revenueTarget ?? 0;
               const weekRealized = week.realizedRevenue || 0;
               const weekPct = week.achievementPercentage || 0;
               const isHit = weekPct >= 100;
@@ -343,15 +343,16 @@ export const SellerMasterGoalTracker: React.FC<SellerMasterGoalTrackerProps> = (
           monthName={goalDetail.monthName || 'Setembro'}
           year={goalDetail.year || 2026}
           monthlyTarget={unitTarget}
-          weeks={weeklyList.map((w) => ({
+          weeks={weeklyList.map((w: any) => ({
             weekNumber: w.weekNumber,
             label: w.label || `Semana ${w.weekNumber}`,
             startDate: w.startDate || '',
             endDate: w.endDate || '',
             startDay: w.startDay || 1,
             endDay: w.endDay || 7,
-            weightPercentage: w.weightPercentage,
-            revenueTarget: w.revenueTarget,
+            dateRangeLabel: w.dateRangeLabel || `${String(w.startDay || 1).padStart(2, '0')} a ${String(w.endDay || 7).padStart(2, '0')}`,
+            weightPercentage: w.weightPercentage || 0,
+            revenueTarget: w.targetAmount ?? w.revenueTarget ?? 0,
           }))}
         />
       )}

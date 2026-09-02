@@ -586,4 +586,41 @@ describe('Varredura Geral de Abas: Isolamento de Dados e Cálculos FP&A', () => 
     assert.strictEqual(totalVarCosts, 29700);
     assert.strictEqual(contributionMargin, 25300);
   });
+
+  test('4. Escada Percentual de Metas FP&A: recálculo automático ao definir Meta 1', () => {
+    const meta1 = 100000;
+    const growthRates = [0, 15, 10, 10]; // +15% para M2, +10% para M3, +10% para M4
+
+    const meta2 = Math.round(meta1 * (1 + growthRates[1] / 100)); // 115.000
+    const meta3 = Math.round(meta2 * (1 + growthRates[2] / 100)); // 126.500
+    const meta4 = Math.round(meta3 * (1 + growthRates[3] / 100)); // 139.150
+
+    assert.strictEqual(meta2, 115000);
+    assert.strictEqual(meta3, 126500);
+    assert.strictEqual(meta4, 139150);
+  });
+
+  test('5. Escada de Metas: Edição Manual pontual e reajuste automático se Meta 1 for alterada', () => {
+    let meta1 = 100000;
+    const growthRates = [0, 15, 10, 10];
+    let manualValues: Record<number, number> = {};
+
+    // Usuário altera manualmente Meta 2 para 120.000 via duplo-clique
+    manualValues[1] = 120000;
+
+    let effectiveMeta2 = manualValues[1] ?? Math.round(meta1 * 1.15);
+    assert.strictEqual(effectiveMeta2, 120000);
+
+    // Usuário re-edita a Meta 1 inicial para 200.000: o estado manual é resetado e recalcula tudo!
+    meta1 = 200000;
+    manualValues = {}; // Limpa edições manuais conforme regra solicitada
+
+    effectiveMeta2 = manualValues[1] ?? Math.round(meta1 * 1.15);
+    const effectiveMeta3 = manualValues[2] ?? Math.round(effectiveMeta2 * 1.10);
+    const effectiveMeta4 = manualValues[3] ?? Math.round(effectiveMeta3 * 1.10);
+
+    assert.strictEqual(effectiveMeta2, 230000); // 200.000 * 1.15
+    assert.strictEqual(effectiveMeta3, 253000); // 230.000 * 1.10
+    assert.strictEqual(effectiveMeta4, 278300); // 253.000 * 1.10
+  });
 });

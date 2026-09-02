@@ -365,7 +365,7 @@ export const GoalSimulatorModal: React.FC<GoalSimulatorModalProps> = ({
                   )}
                 </span>
                 <span className="text-[11px] text-slate-500">
-                  CMV ({financialSettings.defaultCmvPercentage}%) + Imp ({financialSettings.defaultTaxPercentage}%) + Cartão ({financialSettings.defaultCardFeePercentage}%)
+                  CMV ({financialSettings.cmvPercentage}%) + Imp ({financialSettings.taxPercentage}%) + Cartão ({financialSettings.cardFeePercentage}%)
                 </span>
               </div>
 

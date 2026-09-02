@@ -775,15 +775,16 @@ export const SellersView: React.FC = () => {
           monthName={masterGoalDetail?.monthName || 'Setembro'}
           year={masterGoalDetail?.year || 2026}
           monthlyTarget={masterGoalDetail?.unitMonthlyTarget || activeMasterGoal?.monthlyTarget || 0}
-          weeks={(masterGoalDetail?.weeklyGoals || activeMasterGoal?.weeks || []).map((w) => ({
+          weeks={(masterGoalDetail?.weeklyGoals || activeMasterGoal?.weeks || []).map((w: any) => ({
             weekNumber: w.weekNumber,
             label: w.label || `Semana ${w.weekNumber}`,
             startDate: w.startDate || '',
             endDate: w.endDate || '',
             startDay: w.startDay || 1,
             endDay: w.endDay || 7,
-            weightPercentage: w.weightPercentage,
-            revenueTarget: w.revenueTarget,
+            dateRangeLabel: w.dateRangeLabel || `${String(w.startDay || 1).padStart(2, '0')} a ${String(w.endDay || 7).padStart(2, '0')}`,
+            weightPercentage: w.weightPercentage || 0,
+            revenueTarget: w.targetAmount ?? w.revenueTarget ?? 0,
           }))}
         />
       )}

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo } from '
 import {
   Company,
   Branch,
+  BranchType,
   Seller,
   SaleRecord,
   UserRole,
@@ -780,7 +781,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         id: `branch-${activeCompany.id}-matriz`,
         companyId: activeCompany.id,
         name: `${activeCompany.tradeName || activeCompany.name} - Matriz`,
-        type: 'headquarters',
+        type: 'headquarters' as BranchType,
         active: true,
       },
     ];
@@ -842,9 +843,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     
     if (mGoal) {
       if (sale.periodType === 'weekly' && mGoal.weeks && mGoal.weeks[weekIndex]) {
-        // Usa revenueTarget (campo oficial de CommercialWeekPeriod)
-        // targetAmount é campo legado/opcional de SellerWeeklyGoalBreakdown
-        const weekRevTarget = mGoal.weeks[weekIndex].revenueTarget ?? (mGoal.weeklyTarget ?? 0);
+        const weekRevTarget = mGoal.weeks[weekIndex].revenueTarget ?? 0;
         return Math.round(weekRevTarget * (share / 100));
       } else {
         return Math.round(mGoal.monthlyTarget * (share / 100));
@@ -1630,20 +1629,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCompanies((prev) =>
       prev.map((c) => {
         if (c.id === publishedGoal.companyId) {
-          const oldBase = c.levels[0]?.revenueTarget || 1;
-          const updatedLevels = c.levels.map((lvl, idx) => {
-            if (idx === 0) {
-              return { ...lvl, revenueTarget: publishedGoal.monthlyTarget };
-            }
-            const ratio = lvl.revenueTarget / oldBase;
-            return {
-              ...lvl,
-              revenueTarget: Math.round(publishedGoal.monthlyTarget * (ratio > 1 ? ratio : 1 + idx * 0.2)),
-            };
-          });
+          let updatedLevels = c.levels;
+          if (publishedGoal.levels && publishedGoal.levels.length > 0) {
+            updatedLevels = publishedGoal.levels;
+          } else {
+            const oldBase = c.levels[0]?.revenueTarget || 1;
+            updatedLevels = c.levels.map((lvl, idx) => {
+              if (idx === 0) {
+                return { ...lvl, revenueTarget: publishedGoal.monthlyTarget };
+              }
+              const ratio = lvl.revenueTarget / oldBase;
+              return {
+                ...lvl,
+                revenueTarget: Math.round(publishedGoal.monthlyTarget * (ratio > 1 ? ratio : 1 + idx * 0.2)),
+              };
+            });
+          }
           return {
             ...c,
             levels: updatedLevels,
+            levelGrowthPercentages: publishedGoal.levelGrowthPercentages || c.levelGrowthPercentages,
           };
         }
         return c;
@@ -1777,7 +1782,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ? sales.filter((s) => {
           if (s.companyId !== seller.companyId) return false;
           if (s.year && s.year !== year) return false;
-          let saleMonth = s.monthNumber;
+          let saleMonth = (s as any).monthNumber;
           if (!saleMonth && s.periodType === 'weekly' && s.periodNumber) {
             saleMonth = Math.min(12, Math.ceil(s.periodNumber / 4));
           } else if (!saleMonth && s.periodType === 'monthly' && s.periodNumber) {
