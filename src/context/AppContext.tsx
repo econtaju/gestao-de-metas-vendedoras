@@ -1720,24 +1720,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       [key!]: publishedGoal,
     }));
+    syncMasterGoalToSupabase(publishedGoal);
 
     // 2. Sincroniza as metas dos vendedores da filial para refletir a nova meta mensal e semanal
     const branchSellers = sellers.filter(
-      (s) => s.companyId === publishedGoal.companyId && s.branchId === publishedGoal.branchId && s.active
+      (s) =>
+        s.companyId === publishedGoal.companyId &&
+        (publishedGoal.branchId === 'all' || s.branchId === publishedGoal.branchId || companyBranches.length <= 1) &&
+        s.active
     );
 
     if (branchSellers.length > 0) {
       setSellers((prev) =>
         prev.map((s) => {
-          if (s.companyId === publishedGoal.companyId && s.branchId === publishedGoal.branchId) {
+          const belongsToGoal =
+            s.companyId === publishedGoal.companyId &&
+            (publishedGoal.branchId === 'all' || s.branchId === publishedGoal.branchId || companyBranches.length <= 1) &&
+            s.active;
+          if (belongsToGoal) {
             const share = s.officialSharePercentage || (100 / branchSellers.length);
             const sellerMonthlyTarget = Math.round(publishedGoal.monthlyTarget * (share / 100));
             const sellerWeeklyTarget = Math.round(sellerMonthlyTarget / (publishedGoal.numberOfWeeks || 4));
-            return {
+            const updatedSeller = {
               ...s,
               monthlyTarget: sellerMonthlyTarget,
               weeklyTarget: sellerWeeklyTarget,
             };
+            syncSellerToSupabase(updatedSeller);
+            return updatedSeller;
           }
           return s;
         })
@@ -1989,12 +1999,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     newShare: number
   ) => {
     const branchSellers = sellers.filter(
-      (s) => s.companyId === activeCompanyId && s.branchId === branchId && s.active
+      (s) =>
+        s.companyId === activeCompanyId &&
+        (branchId === 'all' || s.branchId === branchId || companyBranches.length <= 1) &&
+        s.active
     );
 
     const inputList = branchSellers.map((s) => ({
       sellerId: s.id,
-      officialSharePercentage: s.officialSharePercentage ?? (100 / branchSellers.length),
+      officialSharePercentage: s.officialSharePercentage ?? (100 / Math.max(1, branchSellers.length)),
     }));
 
     const redistributed = redistributeTeamShares(inputList, changedSellerId, newShare);
@@ -2003,11 +2016,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map((s) => {
         const updated = redistributed.find((r) => r.sellerId === s.id);
         if (updated) {
-          return {
+          const newSellerObj = {
             ...s,
             officialSharePercentage: updated.officialSharePercentage,
             shareOriginType: s.id === changedSellerId ? 'manual' : (s.shareOriginType || 'adjusted'),
           };
+          syncSellerToSupabase(newSellerObj);
+          return newSellerObj;
         }
         return s;
       })

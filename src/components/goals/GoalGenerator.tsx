@@ -15,6 +15,7 @@ import {
   FileSpreadsheet,
   Layers,
   ChevronDown,
+  ChevronUp,
   Info,
   Check,
   PieChart,
@@ -32,6 +33,9 @@ import {
   HelpCircle,
   X,
   AlertTriangle,
+  History,
+  Store,
+  Plus,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { WeeklyWeightSelector } from './WeeklyWeightSelector';
@@ -46,6 +50,7 @@ import {
   WeeklyWeightTemplate,
   GoalSimulationScenario,
   GoalLevel,
+  GoalChangeLog,
 } from '../../types';
 import {
   buildCommercialWeeks,
@@ -91,19 +96,41 @@ export const GoalGenerator: React.FC = () => {
     getTeamParticipation,
     autoRedistributeTeamParticipation,
     updateCompany,
+    currentUser,
   } = useApp();
 
   // Mês e Ano de trabalho
   const [selectedMonthNumber, setSelectedMonthNumber] = useState<number>(9); // Setembro
   const [selectedYear, setSelectedYear] = useState<number>(2026);
 
-  // Unidade selecionada para configuração de metas
-  const selectedBranchId = activeBranchId !== 'all' ? activeBranchId : (companyBranches[0]?.id || `branch-${activeCompany.id}-matriz`);
+  // Unidade selecionada para configuração de metas (com suporte a visão consolidada 'all')
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(() => {
+    if (activeBranchId !== 'all') return activeBranchId;
+    // Se a empresa possui filiais com vendedoras, seleciona a filial que possui vendedoras, senão 'all'
+    const branchWithSellers = companyBranches.find((b) => companySellers.some((s) => s.branchId === b.id));
+    if (branchWithSellers) return branchWithSellers.id;
+    return 'all';
+  });
+
+  // Sincroniza se o filtro global de filial do app mudar
+  useEffect(() => {
+    if (activeBranchId !== 'all') {
+      setSelectedBranchId(activeBranchId);
+    }
+  }, [activeBranchId]);
+
   const activeBranch = companyBranches.find((b) => b.id === selectedBranchId) || companyBranches[0];
 
   // Recupera a Meta Mestre do período atual
   const storageKey = `${activeCompany.id}-${selectedBranchId}-${selectedYear}-${selectedMonthNumber}`;
   const existingMaster = masterGoals[storageKey];
+
+  // Histórico de alterações e logs de auditoria
+  const [changeLogs, setChangeLogs] = useState<GoalChangeLog[]>(() => {
+    return existingMaster?.changeLogs || [];
+  });
+  const [isLogsExpanded, setIsLogsExpanded] = useState<boolean>(false);
+  const [newLogNote, setNewLogNote] = useState<string>('');
 
   // Estado Local de Edição da Meta Mensal
   const [monthlyTarget, setMonthlyTarget] = useState<number>(() => {
@@ -240,6 +267,7 @@ export const GoalGenerator: React.FC = () => {
       setNumberOfWeeks(currentMaster.numberOfWeeks);
       setWeeks(currentMaster.weeks);
       setSelectedTemplateId(currentMaster.templateUsed);
+      setChangeLogs(currentMaster.changeLogs || []);
       if (currentMaster.levelGrowthPercentages && currentMaster.levelGrowthPercentages.length >= 4) {
         setLevelGrowthRates(currentMaster.levelGrowthPercentages);
       }
@@ -256,6 +284,7 @@ export const GoalGenerator: React.FC = () => {
       const baseTarget = activeCompany.levels[0]?.revenueTarget || 0;
       setMonthlyTarget(baseTarget);
       setMonthlyTargetInput(baseTarget > 0 ? baseTarget.toString() : '');
+      setChangeLogs([]);
       const defaultWeights = [15, 20, 25, 40];
       setNumberOfWeeks(4);
       const newWeeks = buildCommercialWeeks(
@@ -539,14 +568,55 @@ export const GoalGenerator: React.FC = () => {
 
   // Vendedores da filial ativa (com fallback inteligente para todas as vendedoras da empresa se a filial específica não tiver vendedoras cadastradas)
   const branchSellers = useMemo(() => {
-    if (selectedBranchId === 'all') {
+    if (selectedBranchId === 'all' || companyBranches.length <= 1) {
       return companySellers.filter((s) => s.active);
     }
     const filtered = companySellers.filter((s) => s.branchId === selectedBranchId && s.active);
     if (filtered.length > 0) return filtered;
     // Fallback: Se a filial selecionada estiver sem vendedoras mas existirem vendedoras na empresa, lista as vendedoras da empresa
     return companySellers.filter((s) => s.active);
-  }, [companySellers, selectedBranchId]);
+  }, [companySellers, selectedBranchId, companyBranches.length]);
+
+  // Função para adicionar logs de auditoria
+  const addAuditLog = (
+    action: GoalChangeLog['action'],
+    description: string,
+    details?: GoalChangeLog['details']
+  ): GoalChangeLog[] => {
+    const newLog: GoalChangeLog = {
+      id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      timestamp: new Date().toISOString(),
+      userName: currentUser?.name || 'leonardo',
+      userRole: currentUser?.role || 'consultant',
+      action,
+      description,
+      details,
+    };
+    const updated = [newLog, ...changeLogs];
+    setChangeLogs(updated);
+    return updated;
+  };
+
+  const handleAddManualNote = () => {
+    if (!newLogNote.trim()) return;
+    const noteText = newLogNote.trim();
+    const updatedLogs = addAuditLog('general_save', `Anotação: ${noteText}`);
+    setNewLogNote('');
+
+    // Salva imediatamente
+    const key = `${activeCompany.id}-${selectedBranchId}-${selectedYear}-${selectedMonthNumber}`;
+    const currentMaster = masterGoals[key];
+    if (currentMaster) {
+      const updated: MonthlyMasterGoal = {
+        ...currentMaster,
+        changeLogs: updatedLogs,
+        updatedAt: new Date().toISOString(),
+      };
+      saveMasterGoal(updated);
+    }
+    setSaveSuccessMessage('Anotação registrada com sucesso no histórico da meta!');
+    setTimeout(() => setSaveSuccessMessage(null), 3000);
+  };
 
   // Resumo de participação da equipe
   const teamSummary = useMemo(() => {
@@ -555,11 +625,22 @@ export const GoalGenerator: React.FC = () => {
 
   // Participação individual handlers
   const handleSellerShareChange = (sellerId: string, newShare: number) => {
+    const seller = branchSellers.find((s) => s.id === sellerId);
     updateSellerShare(sellerId, newShare, 'manual');
+    if (seller) {
+      addAuditLog('update_shares', `Participação de "${seller.name}" ajustada para ${newShare}%`, {
+        sellerName: seller.name,
+        newShare,
+      });
+    }
   };
 
   const handleRedistributeProportionally = (sellerId: string, newShare: number) => {
     autoRedistributeTeamParticipation(selectedBranchId, sellerId, newShare);
+    const seller = branchSellers.find((s) => s.id === sellerId);
+    if (seller) {
+      addAuditLog('update_shares', `Redistribuição proporcional a partir de "${seller.name}" (${newShare}%)`);
+    }
   };
 
   const handleSetEqualDistribution = () => {
@@ -568,6 +649,7 @@ export const GoalGenerator: React.FC = () => {
     branchSellers.forEach((s) => {
       updateSellerShare(s.id, equalShare, 'adjusted');
     });
+    addAuditLog('update_shares', `Distribuição igualitária aplicada (${equalShare}% para cada uma das ${branchSellers.length} vendedoras)`);
   };
 
   const handleApplyHistoricalShares = () => {
@@ -575,7 +657,9 @@ export const GoalGenerator: React.FC = () => {
       const hist = s.historicalSharePercentage ?? (100 / branchSellers.length);
       updateSellerShare(s.id, hist, 'historical');
     });
+    addAuditLog('update_shares', 'Participação histórica aplicada para a equipe comercial');
   };
+
   // Validação geral
   const weeklyWeightsValidation = validateWeeklyWeights(weeks);
   const isGoalFormValid = weeklyWeightsValidation.isValid && teamSummary.isValid;
@@ -599,11 +683,21 @@ export const GoalGenerator: React.FC = () => {
     ];
     const monthName = monthNames[selectedMonthNumber - 1];
 
+    const logAction = actionType === 'publish' ? 'publish' : 'general_save';
+    const logDesc =
+      actionType === 'publish'
+        ? `Meta publicada oficialmente: ${formatCurrency(finalMonthlyTarget)} (${calculatedLevels.length} níveis) para a equipe comercial.`
+        : `Rascunho de metas salvo: ${formatCurrency(finalMonthlyTarget)} (${weeks.length} semanas).`;
+
+    const updatedLogs = addAuditLog(logAction, logDesc, {
+      newMonthlyTarget: finalMonthlyTarget,
+    });
+
     const masterGoalToSave: MonthlyMasterGoal = {
       id: existingMaster?.id || `goal-${activeCompany.id}-${selectedBranchId}-${selectedYear}-${selectedMonthNumber}`,
       companyId: activeCompany.id,
       branchId: selectedBranchId,
-      branchName: activeBranch?.name || 'Unidade Principal',
+      branchName: selectedBranchId === 'all' ? 'Toda a Empresa (Consolidado)' : (activeBranch?.name || 'Unidade Principal'),
       year: selectedYear,
       monthNumber: selectedMonthNumber,
       monthName,
@@ -619,6 +713,9 @@ export const GoalGenerator: React.FC = () => {
       templateUsed: selectedTemplateId,
       commissionRuleType: 'monthly',
       status: actionType === 'publish' ? 'published' : (existingMaster?.status || 'draft'),
+      levels: calculatedLevels,
+      levelGrowthPercentages: levelGrowthRates,
+      changeLogs: updatedLogs,
       updatedAt: new Date().toISOString(),
       publishedAt: actionType === 'publish' ? new Date().toISOString() : existingMaster?.publishedAt,
     };
@@ -705,21 +802,32 @@ export const GoalGenerator: React.FC = () => {
             </div>
           </div>
 
-          {/* Seletores de Unidade e Mês */}
+          {/* Seletores de Unidade, Mês e Ações no Topo */}
           <div className="flex flex-wrap items-center gap-3">
             {/* Seletor de Unidade */}
             <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
               <Building2 className="w-4 h-4 text-slate-500 ml-1" />
               <select
                 value={selectedBranchId}
-                onChange={(e) => setActiveBranchId(e.target.value)}
+                onChange={(e) => {
+                  setSelectedBranchId(e.target.value);
+                  if (e.target.value !== 'all') {
+                    setActiveBranchId(e.target.value);
+                  }
+                }}
                 className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer pr-2"
               >
-                {companyBranches.map((branch) => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.name}
-                  </option>
-                ))}
+                <option value="all">
+                  🏢 Toda a Empresa ({companySellers.filter((s) => s.active).length} vendedoras)
+                </option>
+                {companyBranches.map((branch) => {
+                  const count = companySellers.filter((s) => s.branchId === branch.id && s.active).length;
+                  return (
+                    <option key={branch.id} value={branch.id}>
+                      🏬 {branch.name} ({count} vendedoras)
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
@@ -743,13 +851,101 @@ export const GoalGenerator: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsSimulatorOpen(true)}
-              className="px-4 py-2 text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm"
+              className="px-3.5 py-2 text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
             >
               <Sparkles className="w-4 h-4 text-purple-600" />
-              Simular Cenário
+              Simular
+            </button>
+
+            {/* Botão Salvar Rascunho no Topo */}
+            <button
+              type="button"
+              onClick={handleSaveDraft}
+              className="px-3.5 py-2 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
+              title="Salvar alterações como rascunho"
+            >
+              <Save className="w-3.5 h-3.5 text-slate-600" />
+              <span>Salvar</span>
+            </button>
+
+            {/* Botão Publicar Meta Oficial no Topo */}
+            <button
+              type="button"
+              onClick={handlePublishGoal}
+              disabled={!isGoalFormValid}
+              className={`px-4 py-2 text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer ${
+                isGoalFormValid
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
+                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+              }`}
+              title="Publicar meta oficial da unidade"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Publicar Oficial</span>
             </button>
           </div>
         </div>
+
+        {/* Barra de Filtro Rápido de Unidades / Lojas */}
+        {companyBranches.length > 1 && (
+          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] font-bold text-slate-500 mr-1 flex items-center gap-1">
+              <Store className="w-3.5 h-3.5 text-indigo-600" />
+              Visualizar Equipe:
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedBranchId('all')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                selectedBranchId === 'all'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              <span>🏢 Toda a Empresa</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${selectedBranchId === 'all' ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700'}`}>
+                {companySellers.filter((s) => s.active).length} vendedoras
+              </span>
+            </button>
+            {companyBranches.map((b) => {
+              const count = companySellers.filter((s) => s.branchId === b.id && s.active).length;
+              return (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => setSelectedBranchId(b.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    selectedBranchId === b.id
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  <span>🏬 {b.name}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${selectedBranchId === b.id ? 'bg-indigo-700 text-white' : 'bg-white text-slate-700'}`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Alerta inteligente se houver vendedoras em outras filiais */}
+        {selectedBranchId !== 'all' && branchSellers.length < companySellers.length && (
+          <div className="mt-3 p-2.5 bg-indigo-50/80 border border-indigo-200 rounded-xl text-xs text-indigo-900 flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 font-medium">
+              <Info className="w-4 h-4 text-indigo-600 shrink-0" />
+              Exibindo <strong>{branchSellers.length}</strong> de <strong>{companySellers.length}</strong> vendedoras ativas desta empresa.
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedBranchId('all')}
+              className="text-indigo-700 hover:text-indigo-900 font-bold underline cursor-pointer text-xs shrink-0"
+            >
+              Ver e Distribuir para Toda a Equipe ({companySellers.length})
+            </button>
+          </div>
+        )}
 
         {/* Notificação de Sucesso */}
         {saveSuccessMessage && (
@@ -1174,7 +1370,125 @@ export const GoalGenerator: React.FC = () => {
         branchName={activeBranch?.name || 'Unidade Principal'}
       />
 
-      {/* Barra de Ações Finais */}
+      {/* 7. HISTÓRICO DE ALTERAÇÕES & LOGS DE AUDITORIA */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-amber-50 text-amber-700 border border-amber-200">
+              <History className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-sm text-slate-900">
+                  Histórico de Alterações da Meta (Logs de Auditoria)
+                </h3>
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                  {changeLogs.length} {changeLogs.length === 1 ? 'registro' : 'registros'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">
+                Rastreabilidade de todas as modificações de metas, níveis, escadas e participações realizadas nesta unidade/empresa.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsLogsExpanded(!isLogsExpanded)}
+            className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+          >
+            {isLogsExpanded ? (
+              <>
+                <ChevronUp className="w-4 h-4 text-slate-500" />
+                <span>Recolher Histórico</span>
+              </>
+            ) : (
+              <>
+                <ChevronDown className="w-4 h-4 text-slate-500" />
+                <span>Ver Histórico Completo ({changeLogs.length})</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Campo para registrar observação manual */}
+        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex flex-col sm:flex-row gap-2">
+          <input
+            type="text"
+            placeholder="Adicionar justificativa ou anotação sobre esta meta (ex: Meta reajustada após reunião com diretoria)..."
+            value={newLogNote}
+            onChange={(e) => setNewLogNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleAddManualNote();
+            }}
+            className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
+          />
+          <button
+            type="button"
+            onClick={handleAddManualNote}
+            className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition shrink-0 cursor-pointer flex items-center gap-1.5"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Registrar Anotação</span>
+          </button>
+        </div>
+
+        {/* Lista de Registros da Linha do Tempo */}
+        {isLogsExpanded && (
+          <div className="space-y-2.5 pt-1 max-h-72 overflow-y-auto pr-1">
+            {changeLogs.length === 0 ? (
+              <div className="p-6 text-center text-slate-400 text-xs italic bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+                Nenhuma alteração registrada ainda para este período.
+              </div>
+            ) : (
+              changeLogs.map((log) => (
+                <div
+                  key={log.id}
+                  className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs flex items-start justify-between gap-3 text-xs hover:border-slate-300 transition"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                          log.action === 'publish'
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                            : log.action === 'update_target'
+                            ? 'bg-blue-100 text-blue-800 border border-blue-300'
+                            : log.action === 'update_levels'
+                            ? 'bg-purple-100 text-purple-800 border border-purple-300'
+                            : log.action === 'update_shares'
+                            ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                            : 'bg-slate-100 text-slate-700 border border-slate-300'
+                        }`}
+                      >
+                        {log.action === 'publish'
+                          ? '🚀 Publicação Oficial'
+                          : log.action === 'update_target'
+                          ? '🎯 Meta Mensal'
+                          : log.action === 'update_levels'
+                          ? '📈 Escada de Metas'
+                          : log.action === 'update_shares'
+                          ? '👥 Participação Equipe'
+                          : '📝 Anotação / Rascunho'}
+                      </span>
+                      <span className="font-bold text-slate-800">{log.description}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                      <span>
+                        Autor: <strong>{log.userName}</strong> ({log.userRole === 'consultant' ? 'Consultor' : log.userRole === 'manager' ? 'Gestor' : 'Vendedor'})
+                      </span>
+                      <span>•</span>
+                      <span>{new Date(log.timestamp).toLocaleString('pt-BR')}</span>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Barra de Ações Finais (Salvar Rascunho e Publicar no Rodapé) */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div
@@ -1198,23 +1512,24 @@ export const GoalGenerator: React.FC = () => {
           <button
             type="button"
             onClick={handleSaveDraft}
-            className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+            className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
           >
-            Salvar Rascunho
+            <Save className="w-4 h-4 text-slate-600" />
+            <span>Salvar Rascunho</span>
           </button>
 
           <button
             type="button"
             onClick={handlePublishGoal}
             disabled={!isGoalFormValid}
-            className={`px-5 py-2 text-xs font-semibold rounded-xl shadow-md transition-all flex items-center gap-2 ${
+            className={`px-5 py-2 text-xs font-bold rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer ${
               isGoalFormValid
                 ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
                 : 'bg-slate-200 text-slate-400 cursor-not-allowed'
             }`}
           >
             <CheckCircle2 className="w-4 h-4" />
-            Publicar Meta Oficial da Unidade
+            <span>Publicar Meta Oficial da Unidade</span>
           </button>
         </div>
       </div>

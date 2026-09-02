@@ -601,6 +601,24 @@ export interface MonthlyMasterGoal {
   levelGrowthPercentages?: number[];
   publishedAt?: string;
   updatedAt: string;
+  changeLogs?: GoalChangeLog[];
+}
+
+export interface GoalChangeLog {
+  id: string;
+  timestamp: string;
+  userName: string;
+  userRole?: string;
+  action: 'create' | 'update_target' | 'update_levels' | 'update_shares' | 'publish' | 'manual_override' | 'general_save';
+  description: string;
+  details?: {
+    oldMonthlyTarget?: number;
+    newMonthlyTarget?: number;
+    changedLevels?: { name: string; oldVal?: number; newVal: number }[];
+    sellerName?: string;
+    oldShare?: number;
+    newShare?: number;
+  };
 }
 
 export interface SellerWeeklyGoalBreakdown {

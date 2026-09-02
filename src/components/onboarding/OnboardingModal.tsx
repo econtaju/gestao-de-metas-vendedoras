@@ -24,7 +24,7 @@ interface OnboardingModalProps {
 }
 
 export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClose }) => {
-  const { addCompany, addBranch, addSeller, setActiveCompanyId, setCurrentView } = useApp();
+  const { addCompany, addBranch, updateBranch, addSeller, setActiveCompanyId, setCurrentView } = useApp();
 
   const [step, setStep] = useState<number>(1);
 
@@ -107,20 +107,24 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
 
     const finalCompanyId = addCompany(newCompany);
 
-    // Cria as filiais informadas vinculadas estritamente à nova empresa
-    const createdBranchIds: string[] = [];
+    // Configura a filial principal (Matriz) já gerada em addCompany e adiciona filiais adicionais se houver
+    const primaryBranchId = `branch-${finalCompanyId}-matriz`;
     const validBranches = branches.length > 0 ? branches : ['Matriz'];
-    validBranches.forEach((bName, idx) => {
-      const bId = addBranch({
-        companyId: finalCompanyId,
-        name: bName.trim(),
-        type: idx === 0 ? 'headquarters' : 'branch',
-        active: true,
-      });
-      createdBranchIds.push(bId);
+
+    // Atualiza o nome da matriz para o nome digitado pelo usuário no step 2
+    updateBranch(primaryBranchId, {
+      name: validBranches[0].trim() || `${newCompany.tradeName} - Matriz`,
     });
 
-    const primaryBranchId = createdBranchIds[0] || `branch-${finalCompanyId}-matriz`;
+    // Se o usuário informou filiais adicionais (idx > 0), cria cada uma
+    validBranches.slice(1).forEach((bName) => {
+      addBranch({
+        companyId: finalCompanyId,
+        name: bName.trim(),
+        type: 'branch',
+        active: true,
+      });
+    });
 
     // Cria os vendedores informados vinculados à filial e empresa corretas
     if (sellers.length > 0) {

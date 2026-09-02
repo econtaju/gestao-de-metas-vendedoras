@@ -43,6 +43,7 @@ export const SellersView: React.FC = () => {
     batchAddSellers,
     updateSeller,
     deleteSeller,
+    activeBranchId,
     activePeriodNumber,
     getSellerCalculation,
     getSellerGoalDetail,
@@ -138,7 +139,11 @@ export const SellersView: React.FC = () => {
     setEditingSeller(null);
     setFormData({
       name: '',
-      branchId: companyBranches[0]?.id || `branch-${activeCompany.id}-matriz`,
+      branchId:
+        (activeBranchId !== 'all' ? activeBranchId : null) ||
+        companySellers[0]?.branchId ||
+        companyBranches[0]?.id ||
+        `branch-${activeCompany.id}-matriz`,
       role: 'Consultor de Vendas',
       email: '',
       active: true,
@@ -258,7 +263,12 @@ export const SellersView: React.FC = () => {
             onClick={() => {
               setBatchInput('');
               setBatchFeedback(null);
-              setBatchBranchId(companyBranches[0]?.id || '');
+              setBatchBranchId(
+                (activeBranchId !== 'all' ? activeBranchId : null) ||
+                companySellers[0]?.branchId ||
+                companyBranches[0]?.id ||
+                ''
+              );
               setShowBatchModal(true);
             }}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
