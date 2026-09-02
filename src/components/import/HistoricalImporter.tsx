@@ -74,13 +74,13 @@ export const HistoricalImporter: React.FC = () => {
   );
 
   const companyBranches = useMemo(
-    () => branches.filter((b) => b.companyId === activeCompany.id),
-    [branches, activeCompany.id]
+    () => (activeCompany ? branches.filter((b) => b.companyId === activeCompany.id) : []),
+    [branches, activeCompany?.id]
   );
 
   const companySellers = useMemo(
-    () => sellers.filter((s) => s.companyId === activeCompany.id),
-    [sellers, activeCompany.id]
+    () => (activeCompany ? sellers.filter((s) => s.companyId === activeCompany.id) : []),
+    [sellers, activeCompany?.id]
   );
 
   // Período padrão: Últimos 12 meses

@@ -41,9 +41,9 @@ export const SellerGoalCardModal: React.FC<SellerGoalCardProps> = ({
   isOpen,
   onClose,
 }) => {
-  if (!isOpen) return null;
+  if (!isOpen || !seller) return null;
 
-  const sellerMonthlyTarget = Math.round(monthlyTarget * (seller.officialSharePercentage / 100));
+  const sellerMonthlyTarget = Math.round(monthlyTarget * ((seller.officialSharePercentage || 0) / 100));
   const avgTicket = sellerEntity?.averageTicket || 0;
   const hasTicket = avgTicket > 0;
   

@@ -46,11 +46,11 @@ export const GoalSimulatorModal: React.FC<GoalSimulatorModalProps> = ({
   onApplyAsOfficial,
   onSaveScenario,
 }) => {
-  if (!isOpen) return null;
+  if (!isOpen || !masterGoal) return null;
 
   // Parâmetros de Simulação
   const [scenarioName, setScenarioName] = useState<string>(
-    `Cenário de Crescimento - ${masterGoal.monthName}/${masterGoal.year}`
+    `Cenário de Crescimento - ${masterGoal?.monthName || 'Mês'}/${masterGoal?.year || 2026}`
   );
   const [simulatedMonthlyTarget, setSimulatedMonthlyTarget] = useState<number>(
     Math.round(masterGoal.monthlyTarget * 1.1) // Default +10%
