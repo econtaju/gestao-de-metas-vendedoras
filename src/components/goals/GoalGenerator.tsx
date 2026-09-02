@@ -106,9 +106,6 @@ export const GoalGenerator: React.FC = () => {
   // Unidade selecionada para configuração de metas (com suporte a visão consolidada 'all')
   const [selectedBranchId, setSelectedBranchId] = useState<string>(() => {
     if (activeBranchId !== 'all') return activeBranchId;
-    // Se a empresa possui filiais com vendedoras, seleciona a filial que possui vendedoras, senão 'all'
-    const branchWithSellers = companyBranches.find((b) => companySellers.some((s) => s.branchId === b.id));
-    if (branchWithSellers) return branchWithSellers.id;
     return 'all';
   });
 

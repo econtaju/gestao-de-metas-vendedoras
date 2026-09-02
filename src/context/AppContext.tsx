@@ -873,6 +873,51 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return sellers.filter((s) => s.companyId === activeCompany.id && s.active);
   }, [sellers, activeCompany?.id]);
 
+  // Auto-consolidação defensiva de vendedores e filiais da empresa ativa
+  useEffect(() => {
+    if (!activeCompany?.id || !Array.isArray(sellers) || sellers.length === 0) return;
+    
+    // Todas as filiais da empresa ativa
+    const currentCompanyBranches = branches.filter((b) => b.companyId === activeCompany.id);
+    if (currentCompanyBranches.length === 0) return;
+
+    // Se as filiais da empresa forem apenas matrizes duplicadas (ex: gerada pelo addCompany + onboarding)
+    const isSingleStore = currentCompanyBranches.length <= 1 || currentCompanyBranches.every((b) => 
+      b.type === 'headquarters' || b.name.toLowerCase().includes('matriz')
+    );
+
+    if (isSingleStore) {
+      // Descobre a filial principal com mais vendedores
+      const primaryBranch = currentCompanyBranches.reduce((best, curr) => {
+        const bestCount = sellers.filter((s) => s.companyId === activeCompany.id && s.branchId === best.id).length;
+        const currCount = sellers.filter((s) => s.companyId === activeCompany.id && s.branchId === curr.id).length;
+        return currCount >= bestCount ? curr : best;
+      }, currentCompanyBranches[0]);
+
+      // Unifica todos os vendedores da empresa para a filial principal
+      setSellers((prev) => {
+        let changed = false;
+        const next = prev.map((s) => {
+          if (s.companyId === activeCompany.id && s.branchId !== primaryBranch.id) {
+            changed = true;
+            const updated = { ...s, branchId: primaryBranch.id };
+            syncSellerToSupabase(updated);
+            return updated;
+          }
+          return s;
+        });
+        return changed ? next : prev;
+      });
+
+      // Remove a filial fantasma duplicada se houver mais de uma
+      if (currentCompanyBranches.length > 1) {
+        const duplicates = currentCompanyBranches.filter((b) => b.id !== primaryBranch.id);
+        setBranches((prev) => prev.filter((b) => !duplicates.some((d) => d.id === b.id)));
+        duplicates.forEach((d) => deleteBranchFromSupabase(d.id));
+      }
+    }
+  }, [activeCompany?.id, branches, sellers]);
+
   // Sales belonging to current company
   const companySales = useMemo(() => {
     if (!Array.isArray(sales) || !activeCompany?.id) return [];

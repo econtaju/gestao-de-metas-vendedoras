@@ -370,9 +370,15 @@ export function validateTeamParticipation(
     ? safeSellers
     : safeSellers.filter((s) => s.branchId === branchId);
 
-  // Fallback seguro: se a filial selecionada não tem vendedoras cadastradas mas a empresa tem vendedoras, inclui as vendedoras da empresa
+  // Fallback seguro: se a filial selecionada não tem vendedoras ou se a equipe da empresa foi dividida por engano
   if (branchSellers.length === 0 && safeSellers.length > 0) {
     branchSellers = safeSellers;
+  } else if (branchId !== 'all' && branchSellers.length > 0 && branchSellers.length < safeSellers.length) {
+    const branchSum = branchSellers.reduce((acc, s) => acc + (s.officialSharePercentage || 0), 0);
+    const companySum = safeSellers.reduce((acc, s) => acc + (s.officialSharePercentage || 0), 0);
+    if (branchSum <= 50 && companySum > branchSum) {
+      branchSellers = safeSellers;
+    }
   }
 
   const processed = branchSellers.map((seller) => {
