@@ -366,6 +366,58 @@ export const GoalGenerator: React.FC = () => {
     setTimeout(() => setSaveSuccessMessage(null), 3500);
   };
 
+  // Estados de inputs de texto individuais para cada nível
+  const [levelInputValues, setLevelInputValues] = useState<Record<number, string>>({});
+
+  const getLevelInputValue = (idx: number, fallbackVal: number): string => {
+    if (levelInputValues[idx] !== undefined) {
+      return levelInputValues[idx];
+    }
+    return fallbackVal > 0 ? fallbackVal.toString() : '0';
+  };
+
+  const handleLevelInputChange = (idx: number, textVal: string) => {
+    setLevelInputValues((prev) => ({ ...prev, [idx]: textVal }));
+  };
+
+  const handleLevelInputBlurOrEnter = (idx: number) => {
+    const rawText = levelInputValues[idx];
+    if (rawText === undefined) return;
+    const cleanNum = parseFloat(rawText.replace(/\D/g, '')) || 0;
+
+    if (idx === 0) {
+      handleMonthlyTargetChange(cleanNum);
+    } else {
+      if (cleanNum > 0) {
+        setManualLevelValues((prev) => ({ ...prev, [idx]: cleanNum }));
+        const prevTarget = calculatedLevels[idx - 1]?.revenueTarget || monthlyTarget || 1;
+        const computedGrowth = Math.max(0, Math.round(((cleanNum - prevTarget) / prevTarget) * 100));
+        setLevelGrowthRates((prev) => {
+          const next = [...prev];
+          next[idx] = computedGrowth;
+          return next;
+        });
+        setSaveSuccessMessage(`${calculatedLevels[idx]?.name || `Meta ${idx + 1}`} atualizada para ${formatCurrency(cleanNum)} (+${computedGrowth}% s/ anterior)!`);
+        setTimeout(() => setSaveSuccessMessage(null), 3500);
+      }
+    }
+  };
+
+  const handleGrowthRateChangeDirect = (levelIdx: number, newRate: number) => {
+    const safeRate = Math.max(0, newRate);
+    setLevelGrowthRates((prev) => {
+      const next = [...prev];
+      next[levelIdx] = safeRate;
+      return next;
+    });
+    const prevTarget = calculatedLevels[levelIdx - 1]?.revenueTarget || monthlyTarget || 0;
+    const newVal = Math.round(prevTarget * (1 + safeRate / 100));
+    setManualLevelValues((prev) => ({ ...prev, [levelIdx]: newVal }));
+    setLevelInputValues((prev) => ({ ...prev, [levelIdx]: newVal.toString() }));
+    setSaveSuccessMessage(`Meta ${levelIdx + 1} recalculada para +${safeRate}% (${formatCurrency(newVal)})`);
+    setTimeout(() => setSaveSuccessMessage(null), 3500);
+  };
+
   const handleGrowthRateChange = (levelIdx: number, newRate: number) => {
     setLevelGrowthRates((prev) => {
       const next = [...prev];
@@ -979,11 +1031,11 @@ export const GoalGenerator: React.FC = () => {
               </span>
             </div>
             <span className="text-[11px] text-slate-500 font-medium">
-              💡 Dê <strong>dois cliques</strong> em qualquer meta para editar o valor manualmente.
+              💡 Você pode <strong>digitar o valor em R$</strong> ou <strong>ajustar a %</strong> diretamente em cada meta.
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
             {calculatedLevels.map((lvl, idx) => {
               const estimatedCommission = Math.round(lvl.revenueTarget * (lvl.commissionPercentage / 100));
               const isManual = idx > 0 && manualLevelValues[idx] !== undefined;
@@ -992,59 +1044,83 @@ export const GoalGenerator: React.FC = () => {
               return (
                 <div
                   key={lvl.level}
-                  onDoubleClick={() => handleOpenEditLevel(idx)}
-                  title="Dê dois cliques para editar o valor desta meta manualmente"
-                  className={`p-3.5 rounded-xl border transition-all cursor-pointer relative group select-none hover:shadow-md ${
+                  className={`p-4 rounded-2xl border-2 transition-all shadow-xs ${
                     idx === 0
-                      ? 'bg-emerald-50/80 border-emerald-300 hover:border-emerald-400'
+                      ? 'bg-emerald-50/90 border-emerald-300 ring-1 ring-emerald-400/20'
                       : idx === 1
-                      ? 'bg-blue-50/80 border-blue-300 hover:border-blue-400'
+                      ? 'bg-blue-50/90 border-blue-300 ring-1 ring-blue-400/20'
                       : idx === 2
-                      ? 'bg-purple-50/80 border-purple-300 hover:border-purple-400'
-                      : 'bg-amber-50/80 border-amber-300 hover:border-amber-400'
+                      ? 'bg-purple-50/90 border-purple-300 ring-1 ring-purple-400/20'
+                      : 'bg-amber-50/90 border-amber-300 ring-1 ring-amber-400/20'
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center justify-between mb-2">
                     <span className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-slate-700" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-slate-800" />
                       {lvl.name}
                     </span>
                     <div className="flex items-center gap-1">
-                      {isManual ? (
+                      {isManual && (
                         <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">
                           ✏️ Manual
                         </span>
-                      ) : idx > 0 ? (
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-white/80 text-slate-600 border border-slate-200">
-                          +{growthPercent}%
-                        </span>
-                      ) : null}
+                      )}
                       <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">
-                        {lvl.commissionPercentage}%
+                        {lvl.commissionPercentage}% Comiss.
                       </span>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between">
-                    <div className="text-base font-bold font-mono text-slate-900 tracking-tight">
-                      {formatCurrency(lvl.revenueTarget)}
+                  {/* Input Direto de Valor em R$ */}
+                  <div className="space-y-1 my-2">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Valor da Meta (R$):
+                    </label>
+                    <div className="relative flex items-center">
+                      <span className="absolute left-3 text-xs font-bold text-slate-400">R$</span>
+                      <input
+                        type="text"
+                        value={getLevelInputValue(idx, lvl.revenueTarget)}
+                        onChange={(e) => handleLevelInputChange(idx, e.target.value)}
+                        onBlur={() => handleLevelInputBlurOrEnter(idx)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleLevelInputBlurOrEnter(idx);
+                        }}
+                        className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-300 rounded-xl font-mono font-bold text-sm text-slate-900 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 focus:outline-none shadow-2xs transition-all"
+                        placeholder="0"
+                      />
                     </div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOpenEditLevel(idx);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 transition p-1 bg-white/90 hover:bg-white text-slate-600 hover:text-slate-900 rounded-lg shadow-xs border border-slate-200 cursor-pointer"
-                      title="Editar valor manualmente"
-                    >
-                      <Edit2 className="w-3 h-3" />
-                    </button>
                   </div>
 
-                  <div className="text-[11px] text-slate-600 mt-1.5 flex justify-between pt-1 border-t border-slate-200/60">
+                  {/* Seletor de Porcentagem (para Metas 2, 3 e 4) */}
+                  {idx > 0 ? (
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 text-xs">
+                      <span className="text-[11px] text-slate-600 font-medium">Ajuste %:</span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs font-bold text-indigo-700">+</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={growthPercent}
+                          onChange={(e) => handleGrowthRateChangeDirect(idx, parseFloat(e.target.value) || 0)}
+                          className="w-12 text-center py-0.5 px-1 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:border-indigo-600 focus:outline-none"
+                        />
+                        <span className="text-[11px] font-bold text-slate-600">% s/ anterior</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="pt-2 border-t border-slate-200/70 text-xs text-emerald-800 font-medium flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Meta Base da Unidade</span>
+                    </div>
+                  )}
+
+                  {/* Prêmio Estimado da Equipe */}
+                  <div className="text-[11px] text-slate-600 mt-2 flex justify-between pt-1.5 border-t border-slate-200/70">
                     <span>Prêmio Equipe:</span>
-                    <strong className="text-slate-900">{formatCurrency(estimatedCommission)}</strong>
+                    <strong className="text-slate-900 font-mono">{formatCurrency(estimatedCommission)}</strong>
                   </div>
                 </div>
               );
