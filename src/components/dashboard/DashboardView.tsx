@@ -76,7 +76,7 @@ export const DashboardView: React.FC = () => {
             if (mGoal) {
               sumTarget += mGoal.monthlyTarget;
             } else {
-              sumTarget += activeCompany.levels[0]?.revenueTarget || 30000;
+              sumTarget += activeCompany?.levels?.[0]?.revenueTarget || 30000;
             }
           }
         });
@@ -88,7 +88,7 @@ export const DashboardView: React.FC = () => {
           if (mGoal) {
             sumTarget += mGoal.monthlyTarget;
           } else {
-            sumTarget += activeCompany.levels[0]?.revenueTarget || 30000;
+            sumTarget += activeCompany?.levels?.[0]?.revenueTarget || 30000;
           }
         });
       }
@@ -102,7 +102,7 @@ export const DashboardView: React.FC = () => {
             if (mGoal) {
               sumTarget += mGoal.monthlyTarget;
             } else {
-              sumTarget += activeCompany.levels[0]?.revenueTarget || 0;
+              sumTarget += activeCompany?.levels?.[0]?.revenueTarget || 0;
             }
           });
         });
@@ -131,13 +131,13 @@ export const DashboardView: React.FC = () => {
           if (mGoal && mGoal.weeks && mGoal.weeks[weekIndexInMonth]) {
             sumTarget += mGoal.weeks[weekIndexInMonth].revenueTarget;
           } else {
-            sumTarget += (activeCompany.levels[0]?.revenueTarget || 0) / 4;
+            sumTarget += (activeCompany?.levels?.[0]?.revenueTarget || 0) / 4;
           }
         });
       }
     }
     return sumTarget;
-  }, [activeCompany.id, activeBranchId, activePeriodType, activePeriodNumber, companyBranches, masterGoals, activeCompany.levels]);
+  }, [activeCompany?.id, activeBranchId, activePeriodType, activePeriodNumber, companyBranches, masterGoals, activeCompany?.levels]);
 
   // Consolidated financial aggregations for the filtered period
   const metrics = useMemo(() => {

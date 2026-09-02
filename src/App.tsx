@@ -20,6 +20,7 @@ import { TeamAvailabilityView } from './components/availability/TeamAvailability
 import { LoginView } from './components/auth/LoginView';
 import { UserApprovalModal } from './components/auth/UserApprovalModal';
 import { UserManagementView } from './components/auth/UserManagementView';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { handleTokenAction, syncUsersFromRemote } from './services/authService';
 import { ALLOWED_VIEWS_BY_ROLE } from './types';
 
@@ -141,7 +142,11 @@ const MainContent: React.FC = () => {
 
         {/* Scrollable Viewport */}
         <main className="flex-1 overflow-y-auto px-4 md:px-8 py-6">
-          <div className="max-w-7xl mx-auto">{renderActiveView()}</div>
+          <div className="max-w-7xl mx-auto">
+            <ErrorBoundary key={currentView} fallbackViewName={currentView}>
+              {renderActiveView()}
+            </ErrorBoundary>
+          </div>
         </main>
       </div>
 
