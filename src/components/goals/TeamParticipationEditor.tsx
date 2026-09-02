@@ -100,13 +100,13 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
       {/* Header */}
-      <div className="p-5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
+      <div className="p-4 sm:p-5 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-purple-100 text-purple-700 rounded-lg">
+          <div className="p-2 bg-purple-100 text-purple-700 rounded-lg shrink-0">
             <Users className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-base font-semibold text-slate-800">
+            <h3 className="text-sm sm:text-base font-semibold text-slate-800">
               Participação dos Vendedores na Meta da Unidade
             </h3>
             <p className="text-xs text-slate-500">
@@ -116,37 +116,37 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
         </div>
 
         {/* Ações Rápidas de Distribuição */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
           <button
             type="button"
             onClick={() => setCurrentView('team_availability')}
-            className="px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
+            className="flex-1 sm:flex-none px-2.5 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg shadow-2xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <Calendar className="w-3.5 h-3.5 text-indigo-600" />
-            Escala / Férias
+            <span>Escala / Férias</span>
           </button>
           <button
             type="button"
             onClick={onApplyHistoricalShares}
-            className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+            className="flex-1 sm:flex-none px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg shadow-2xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-            Usar Histórico Real
+            <span>Histórico</span>
           </button>
           <button
             type="button"
             onClick={onSetEqualDistribution}
-            className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+            className="flex-1 sm:flex-none px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg shadow-2xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
-            Divisão Igualitária
+            <span>Divisão Igual</span>
           </button>
         </div>
       </div>
 
-      <div className="p-5 space-y-5">
-        {/* Tabela de Vendedores */}
-        <div className="overflow-x-auto">
+      <div className="p-4 sm:p-5 space-y-5">
+        {/* Tabela de Vendedores (Visível em Tablets e Desktops) */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="border-b border-slate-200 text-slate-500 font-semibold bg-slate-50/70">
@@ -313,9 +313,117 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
           </table>
         </div>
 
+        {/* Mobile Card List View (Exclusivo para Smartphones) */}
+        <div className="md:hidden space-y-3">
+          {safeSellers.length === 0 ? (
+            <div className="p-6 text-center bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+              <Users className="w-6 h-6 text-purple-600 mx-auto mb-2" />
+              <p className="text-xs font-bold text-slate-700">Nenhum vendedor cadastrado</p>
+              <button
+                type="button"
+                onClick={() => setCurrentView('sellers')}
+                className="mt-2 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold"
+              >
+                + Cadastrar Vendedores
+              </button>
+            </div>
+          ) : (
+            safeSellers.map((seller) => {
+              const officialShare = seller.officialSharePercentage ?? 25;
+              const historicalShare = seller.historicalSharePercentage ?? 25;
+              const sellerTarget = Math.round(monthlyTarget * (officialShare / 100));
+              const requiredSales = Math.ceil(sellerTarget / Math.max(1, seller.averageTicket || 300));
+
+              return (
+                <div
+                  key={seller.sellerId}
+                  className="bg-slate-50/70 p-3.5 rounded-xl border border-slate-200 space-y-2.5 shadow-2xs"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-bold text-slate-900 text-sm">{seller.sellerName}</div>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        {renderSeniorityBadge(seller.seniorityLevel)}
+                        {renderOriginBadge(seller.shareOriginType)}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onRedistributeProportionally(seller.sellerId, seller.officialSharePercentage)}
+                      title="Compensar participação"
+                      className="px-2.5 py-1 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 transition cursor-pointer"
+                    >
+                      Compensar
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs pt-1.5 border-t border-slate-200/70">
+                    <span className="text-slate-500">Meta Mensal:</span>
+                    <strong className="text-slate-900 font-mono text-sm">{formatCurrency(sellerTarget)}</strong>
+                  </div>
+
+                  {/* Slider de toque fluido e input de % */}
+                  <div className="space-y-1.5 bg-white p-2.5 rounded-lg border border-slate-200">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-slate-700">Participação na Meta:</span>
+                      <span className="font-bold text-indigo-700 font-mono text-sm">{officialShare.toFixed(1)}%</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        value={officialShare}
+                        onChange={(e) => onSellerShareChange(seller.sellerId, parseFloat(e.target.value) || 0)}
+                        className="flex-1 accent-indigo-600 h-2 bg-slate-200 rounded-lg cursor-pointer"
+                      />
+                      <div className="relative shrink-0">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.5"
+                          value={officialShare}
+                          onChange={(e) => onSellerShareChange(seller.sellerId, parseFloat(e.target.value) || 0)}
+                          className="w-16 px-2 py-1 text-xs font-mono font-bold text-right text-slate-900 bg-slate-50 border border-slate-300 rounded focus:outline-none"
+                        />
+                        <span className="absolute right-1 top-1 text-[10px] text-slate-400 font-mono pointer-events-none">
+                          %
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
+                    <span>Ticket Médio: <strong className="text-slate-700">{formatCurrency(seller.averageTicket)}</strong></span>
+                    <span className="font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
+                      {requiredSales} vendas
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          )}
+
+          {/* Resumo Mobile do Total da Equipe */}
+          {safeSellers.length > 0 && (
+            <div className="p-3 bg-slate-100/90 rounded-xl border border-slate-200 flex items-center justify-between text-xs font-bold text-slate-900">
+              <span>Total da Equipe ({safeSellers.length} vendedoras):</span>
+              <span
+                className={`font-mono px-2 py-0.5 rounded-md ${
+                  isValid ? 'bg-emerald-100 text-emerald-900' : 'bg-amber-100 text-amber-900'
+                }`}
+              >
+                {totalSharePercentage.toFixed(1)}% / 100%
+              </span>
+            </div>
+          )}
+        </div>
+
         {/* Alerta de Validação da Equipe */}
         <div
-          className={`p-3.5 rounded-lg border flex items-center justify-between transition-all ${
+          className={`p-3.5 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-all ${
             isValid
               ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800'
               : 'bg-amber-50/90 border-amber-200 text-amber-800'
@@ -345,7 +453,7 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
             <button
               type="button"
               onClick={onSetEqualDistribution}
-              className="px-3 py-1.5 text-xs font-semibold bg-amber-600 text-white hover:bg-amber-700 rounded-lg shadow-sm transition-colors shrink-0"
+              className="w-full sm:w-auto px-3 py-2 text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 rounded-lg shadow-2xs transition-colors shrink-0 text-center"
             >
               Equalizar Automaticamente
             </button>

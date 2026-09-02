@@ -327,9 +327,9 @@ export const DashboardView: React.FC = () => {
   return (
     <div id="dashboard-view-container" className="space-y-6 pb-12">
       {/* Top Banner with Quick Context */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-slate-900 to-slate-800 p-5 rounded-2xl text-white shadow-md">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-slate-900 to-slate-800 p-4 sm:p-5 rounded-2xl text-white shadow-md">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-xs font-bold px-2.5 py-0.5 rounded-md uppercase tracking-wider">
               Painel de Desempenho Executivo
             </span>
@@ -339,7 +339,7 @@ export const DashboardView: React.FC = () => {
                 : `Semana ${activePeriodNumber.toString().padStart(2, '0')} de 2026`}
             </span>
           </div>
-          <h2 className="text-xl md:text-2xl font-bold tracking-tight mt-1">
+          <h2 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight mt-1">
             Gestão Comercial & Rentabilidade Líquida
           </h2>
           <p className="text-xs text-slate-300 mt-0.5">
@@ -348,36 +348,36 @@ export const DashboardView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap w-full md:w-auto">
           <button
             id="dash-btn-intelligence"
             onClick={() => setCurrentView('commercial_intelligence')}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow transition"
+            className="flex-1 md:flex-none justify-center flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow transition"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            Inteligência 2025
+            <span>Inteligência</span>
           </button>
           <button
             id="dash-btn-goal-gen"
             onClick={() => setCurrentView('goals_generator')}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow transition"
+            className="flex-1 md:flex-none justify-center flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow transition"
           >
             <Target className="w-3.5 h-3.5" />
-            Gerador de Metas
+            <span>Metas</span>
           </button>
           <button
             id="dash-btn-simulator"
             onClick={() => setCurrentView('simulator')}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-700 hover:bg-slate-600 text-slate-100 rounded-xl text-xs font-semibold transition border border-slate-600"
+            className="flex-1 md:flex-none justify-center flex items-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-100 rounded-xl text-xs font-semibold transition border border-slate-600"
           >
             <TrendingUp className="w-3.5 h-3.5" />
-            Simulador
+            <span>Simulador</span>
           </button>
         </div>
       </div>
 
       {/* 11 Primary KPI Cards Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3.5">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2.5 sm:gap-3.5">
         {/* Card 1: Faturamento Atual */}
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
           <div className="flex items-center justify-between text-slate-500 mb-1">

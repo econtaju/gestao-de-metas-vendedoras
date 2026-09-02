@@ -23,15 +23,22 @@ import {
   ShieldCheck,
   User,
   Trash2,
+  X,
 } from 'lucide-react';
 import { useApp, ActiveView } from '../../context/AppContext';
 import { UserRole } from '../../types';
 
 interface SidebarProps {
   onOpenOnboarding: () => void;
+  isMobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ onOpenOnboarding }) => {
+export const Sidebar: React.FC<SidebarProps> = ({
+  onOpenOnboarding,
+  isMobileOpen = false,
+  onCloseMobile,
+}) => {
   const {
     companies,
     activeCompanyId,
@@ -80,26 +87,51 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenOnboarding }) => {
   const visibleNavItems = navItems.filter((item) => item.roles.includes(effectiveRole));
 
   return (
-    <aside
-      id="main-sidebar"
-      className="w-68 bg-slate-900 text-slate-100 flex flex-col flex-shrink-0 border-r border-slate-800 select-none h-screen sticky top-0"
-    >
-      {/* Brand Header */}
-      <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-            <TrendingUp className="w-5 h-5 text-white" />
+    <>
+      {/* Backdrop para telas mobile */}
+      {isMobileOpen && (
+        <div
+          id="sidebar-mobile-backdrop"
+          onClick={onCloseMobile}
+          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs lg:hidden transition-opacity"
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        id="main-sidebar"
+        className={`bg-slate-900 text-slate-100 flex flex-col flex-shrink-0 border-r border-slate-800 select-none h-screen transition-transform duration-300 ease-in-out z-50 ${
+          isMobileOpen
+            ? 'fixed inset-y-0 left-0 w-72 max-w-[85vw] translate-x-0 shadow-2xl'
+            : 'fixed inset-y-0 left-0 w-72 -translate-x-full lg:static lg:w-68 lg:translate-x-0 lg:flex'
+        }`}
+      >
+        {/* Brand Header */}
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+              <TrendingUp className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <span className="font-bold text-base tracking-tight text-white block">
+                MetaRentável
+              </span>
+              <span className="text-[11px] font-medium text-emerald-400 tracking-wider uppercase block">
+                FP&A & Gestão Comercial
+              </span>
+            </div>
           </div>
-          <div>
-            <span className="font-bold text-base tracking-tight text-white block">
-              MetaRentável
-            </span>
-            <span className="text-[11px] font-medium text-emerald-400 tracking-wider uppercase block">
-              FP&A & Gestão Comercial
-            </span>
-          </div>
+
+          {/* Botão Fechar no Mobile */}
+          <button
+            type="button"
+            onClick={onCloseMobile}
+            className="lg:hidden p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition cursor-pointer"
+            title="Fechar menu"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
-      </div>
 
       {/* Logged User Profile Banner (Top of Sidebar) */}
       {currentUser && (
@@ -131,7 +163,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenOnboarding }) => {
             <button
               type="button"
               id="btn-open-user-management-sidebar"
-              onClick={() => setIsUserManagementOpen(true)}
+              onClick={() => {
+                setIsUserManagementOpen(true);
+                onCloseMobile?.();
+              }}
               className="w-full mt-2.5 py-1.5 px-2 bg-indigo-900/40 hover:bg-indigo-900/80 border border-indigo-500/40 text-indigo-200 hover:text-white rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
             >
               <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
@@ -230,7 +265,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenOnboarding }) => {
             <button
               key={item.id}
               id={`nav-item-${item.id}`}
-              onClick={() => setCurrentView(item.id)}
+              onClick={() => {
+                setCurrentView(item.id);
+                onCloseMobile?.();
+              }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
                 isActive
                   ? 'bg-emerald-600 text-white shadow-md shadow-emerald-900/30'
@@ -259,7 +297,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenOnboarding }) => {
 
         <button
           id="btn-onboarding-sidebar"
-          onClick={onOpenOnboarding}
+          onClick={() => {
+            onOpenOnboarding();
+            onCloseMobile?.();
+          }}
           className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 rounded-lg text-xs font-medium transition border border-slate-700"
         >
           <Compass className="w-3.5 h-3.5" />
@@ -296,5 +337,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenOnboarding }) => {
         </div>
       </div>
     </aside>
+  </>
   );
 };

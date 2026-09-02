@@ -258,7 +258,7 @@ export const SellersView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
           <button
             onClick={() => {
               setBatchInput('');
@@ -271,7 +271,7 @@ export const SellersView: React.FC = () => {
               );
               setShowBatchModal(true);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+            className="w-full sm:w-auto justify-center flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
           >
             <UserPlus className="w-4 h-4 text-indigo-600" />
             ⚡ Cadastrar em Lote
@@ -279,7 +279,7 @@ export const SellersView: React.FC = () => {
 
           <button
             onClick={handleOpenAdd}
-            className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition cursor-pointer"
+            className="w-full sm:w-auto justify-center flex items-center gap-1.5 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             Cadastrar Novo Vendedor
@@ -290,14 +290,14 @@ export const SellersView: React.FC = () => {
       {/* Main Grid: Seller Selector List & Detailed Individual Tracker */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Sellers List */}
-        <div className="lg:col-span-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+        <div className="lg:col-span-4 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
           <div className="flex items-center justify-between pb-2 border-b border-slate-100">
             <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
               Vendedores Ativos ({companySellers.length})
             </span>
           </div>
 
-          <div className="space-y-2 max-h-[650px] overflow-y-auto pr-1">
+          <div className="space-y-2 max-h-[280px] lg:max-h-[650px] overflow-y-auto pr-1">
             {companySellers.length === 0 ? (
               <div className="p-8 text-center text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200 space-y-2">
                 <Users className="w-8 h-8 mx-auto text-slate-300" />

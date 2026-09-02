@@ -23,6 +23,7 @@ import { UserManagementView } from './components/auth/UserManagementView';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { handleTokenAction, syncUsersFromRemote } from './services/authService';
 import { ALLOWED_VIEWS_BY_ROLE } from './types';
+import { MobileBottomNav } from './components/layout/MobileBottomNav';
 
 const MainContent: React.FC = () => {
   const {
@@ -37,6 +38,7 @@ const MainContent: React.FC = () => {
   } = useApp();
 
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [approvalMessage, setApprovalMessage] = useState<string | null>(null);
 
   // Sincronização em segundo plano com o Supabase
@@ -133,15 +135,22 @@ const MainContent: React.FC = () => {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-slate-100 text-slate-900 font-sans antialiased selection:bg-emerald-500 selection:text-white">
       {/* Sidebar Navigation */}
-      <Sidebar onOpenOnboarding={() => setIsOnboardingOpen(true)} />
+      <Sidebar
+        onOpenOnboarding={() => setIsOnboardingOpen(true)}
+        isMobileOpen={isMobileMenuOpen}
+        onCloseMobile={() => setIsMobileMenuOpen(false)}
+      />
 
       {/* Main Content Area */}
       <div className="flex flex-col flex-1 h-full min-w-0 overflow-hidden">
         {/* Topbar with company selector, branch filter, period selector, and role switcher */}
-        <Topbar onOpenOnboarding={() => setIsOnboardingOpen(true)} />
+        <Topbar
+          onOpenOnboarding={() => setIsOnboardingOpen(true)}
+          onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
+        />
 
-        {/* Scrollable Viewport */}
-        <main className="flex-1 overflow-y-auto px-4 md:px-8 py-6">
+        {/* Scrollable Viewport with bottom compensation padding for mobile bottom bar */}
+        <main className="flex-1 overflow-y-auto px-3 sm:px-6 md:px-8 py-4 sm:py-6 pb-24 lg:pb-8">
           <div className="max-w-7xl mx-auto">
             <ErrorBoundary key={currentView} fallbackViewName={currentView}>
               {renderActiveView()}
@@ -149,6 +158,9 @@ const MainContent: React.FC = () => {
           </div>
         </main>
       </div>
+
+      {/* Mobile Bottom Navigation Bar (Smartphones) */}
+      <MobileBottomNav onOpenMenu={() => setIsMobileMenuOpen(true)} />
 
       {/* Onboarding Wizard Modal */}
       <OnboardingModal
