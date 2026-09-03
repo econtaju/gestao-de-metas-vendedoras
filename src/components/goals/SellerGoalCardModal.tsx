@@ -7,9 +7,13 @@ import {
   AlertTriangle,
   FileCheck,
   Award,
+  Palmtree,
+  Clock,
 } from 'lucide-react';
 import { Seller, CommercialWeekPeriod, Company } from '../../types';
 import { formatCurrency } from '../../services/financialEngine';
+import { getSellerIntervalAvailability } from '../../services/availabilityEngine';
+import { useApp } from '../../context/AppContext';
 
 interface SellerGoalCardProps {
   seller: {
@@ -27,6 +31,7 @@ interface SellerGoalCardProps {
   weeks: CommercialWeekPeriod[];
   isOpen: boolean;
   onClose: () => void;
+  monthNumber?: number;
 }
 
 export const SellerGoalCardModal: React.FC<SellerGoalCardProps> = ({
@@ -40,10 +45,56 @@ export const SellerGoalCardModal: React.FC<SellerGoalCardProps> = ({
   weeks,
   isOpen,
   onClose,
+  monthNumber = 9,
 }) => {
+  const { availabilities, workingDaysSettings } = useApp();
+
   if (!isOpen || !seller) return null;
 
-  const sellerMonthlyTarget = Math.round(monthlyTarget * ((seller.officialSharePercentage || 0) / 100));
+  // Calcula cada semana considerando férias e dias úteis trabalhados
+  const weekDetails = weeks.map((w) => {
+    const mStr = String(monthNumber).padStart(2, '0');
+    const startDateStr =
+      w.startDate ||
+      `${year}-${mStr}-${String(w.startDay || 1).padStart(2, '0')}`;
+    const endDateStr =
+      w.endDate ||
+      `${year}-${mStr}-${String(w.endDay || 7).padStart(2, '0')}`;
+
+    const avail = getSellerIntervalAvailability(
+      seller.sellerId,
+      startDateStr,
+      endDateStr,
+      availabilities || [],
+      workingDaysSettings
+    );
+
+    const baseWeekTarget = Math.round(
+      monthlyTarget * (w.weightPercentage / 100) * ((seller.officialSharePercentage || 0) / 100)
+    );
+    const adjustedWeekTarget = Math.round(baseWeekTarget * avail.factor);
+    const workedDays = avail.daysAvailable;
+    const expectedDays = avail.daysExpected;
+    const daily = workedDays > 0 ? Math.round(adjustedWeekTarget / workedDays) : 0;
+    const isFullAbsence = avail.factor === 0 && expectedDays > 0;
+    const isPartialAbsence = avail.factor > 0 && avail.factor < 1;
+
+    return {
+      week: w,
+      avail,
+      baseWeekTarget,
+      adjustedWeekTarget,
+      workedDays,
+      expectedDays,
+      daily,
+      isFullAbsence,
+      isPartialAbsence,
+    };
+  });
+
+  const sellerMonthlyTarget = weekDetails.reduce((acc, wd) => acc + wd.adjustedWeekTarget, 0);
+  const baseMonthlyTarget = Math.round(monthlyTarget * ((seller.officialSharePercentage || 0) / 100));
+  const hasAbsences = weekDetails.some((wd) => wd.isFullAbsence || wd.isPartialAbsence);
   const avgTicket = sellerEntity?.averageTicket || 0;
   const hasTicket = avgTicket > 0;
   
@@ -58,6 +109,9 @@ export const SellerGoalCardModal: React.FC<SellerGoalCardProps> = ({
     text += `👤 *Consultor(a):* ${seller.sellerName}\n`;
     text += `📊 *Participação na Meta da Loja:* ${seller.officialSharePercentage.toFixed(1)}%\n\n`;
     text += `💰 *SUA META MENSAL:* ${formatCurrency(sellerMonthlyTarget)}\n`;
+    if (hasAbsences) {
+      text += `🌴 *(Ajustada proporcionalmente às suas férias/dias trabalhados no mês)*\n`;
+    }
     if (hasTicket) {
       text += `🎯 *Ticket Médio Estimado:* ${formatCurrency(avgTicket)}\n`;
       text += `🛍️ *Meta de Clientes/Atendimentos no Mês:* ~${monthlyClientsTarget} vendas\n`;
@@ -66,17 +120,21 @@ export const SellerGoalCardModal: React.FC<SellerGoalCardProps> = ({
     }
     text += `\n📅 *DESDOBRAMENTO POR SEMANA COMERCIAL:*\n`;
 
-    weeks.forEach((w) => {
-      const wTarget = Math.round(monthlyTarget * (w.weightPercentage / 100) * (seller.officialSharePercentage / 100));
-      const days = (w.endDay && w.startDay) ? (w.endDay - w.startDay + 1) : 7;
-      const daily = Math.round(wTarget / days);
-      const wClients = hasTicket ? Math.ceil(wTarget / avgTicket) : null;
-
+    weekDetails.forEach((wd) => {
+      const w = wd.week;
       text += `• *Semana ${w.weekNumber}* (${w.label || w.dateRangeLabel || `Semana ${w.weekNumber}`}):\n`;
-      text += `   - Meta: ${formatCurrency(wTarget)} (Peso ${w.weightPercentage}%)\n`;
-      text += `   - Média Diária: ~${formatCurrency(daily)}/dia\n`;
-      if (wClients) {
-        text += `   - Atendimentos: ~${wClients} clientes (~${Math.ceil(wClients / days)}/dia)\n`;
+      if (wd.isFullAbsence) {
+        text += `   - 🌴 *FÉRIAS / AFASTAMENTO* (R$ 0,00)\n`;
+      } else if (wd.isPartialAbsence) {
+        text += `   - Meta: ${formatCurrency(wd.adjustedWeekTarget)} (Férias parciais: ${wd.workedDays}/${wd.expectedDays} dias úteis)\n`;
+        text += `   - Média Diária: ~${formatCurrency(wd.daily)}/dia trabalhado\n`;
+      } else {
+        text += `   - Meta: ${formatCurrency(wd.adjustedWeekTarget)} (Peso ${w.weightPercentage}%)\n`;
+        text += `   - Média Diária: ~${formatCurrency(wd.daily)}/dia\n`;
+      }
+      if (hasTicket && !wd.isFullAbsence) {
+        const wClients = Math.ceil(wd.adjustedWeekTarget / avgTicket);
+        text += `   - Atendimentos: ~${wClients} clientes\n`;
       }
     });
 
@@ -236,37 +294,49 @@ export const SellerGoalCardModal: React.FC<SellerGoalCardProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 font-medium">
-                  {weeks.map((w) => {
-                    const weekTarget = Math.round(
-                      monthlyTarget * (w.weightPercentage / 100) * (seller.officialSharePercentage / 100)
-                    );
-                    const days = (w.endDay && w.startDay) ? (w.endDay - w.startDay + 1) : 7;
-                    const dailyTarget = Math.round(weekTarget / days);
-                    const wClients = hasTicket ? Math.ceil(weekTarget / avgTicket) : 0;
-                    const dailyClients = hasTicket ? Math.ceil(wClients / days) : 0;
+                  {weekDetails.map((wd) => {
+                    const w = wd.week;
+                    const wClients = hasTicket ? Math.ceil(wd.adjustedWeekTarget / avgTicket) : 0;
+                    const dailyClients = hasTicket && wd.workedDays > 0 ? Math.ceil(wClients / wd.workedDays) : 0;
 
                     return (
-                      <tr key={w.weekNumber} className="hover:bg-slate-50">
+                      <tr key={w.weekNumber} className={`hover:bg-slate-50 ${wd.isFullAbsence ? 'bg-amber-50/40' : ''}`}>
                         <td className="p-3 font-bold text-slate-900">
-                          Semana {w.weekNumber} ({w.label || w.dateRangeLabel || `Dias S${w.weekNumber}`})
+                          <div>Semana {w.weekNumber} ({w.label || w.dateRangeLabel || `Dias S${w.weekNumber}`})</div>
+                          {wd.isFullAbsence && (
+                            <div className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold">
+                              <Palmtree className="w-3 h-3 text-amber-700" />
+                              <span>Férias / Afastada (0 dias)</span>
+                            </div>
+                          )}
+                          {wd.isPartialAbsence && (
+                            <div className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold">
+                              <Clock className="w-2.5 h-2.5 text-amber-700" />
+                              <span>Férias parciais ({wd.workedDays}/{wd.expectedDays} dias)</span>
+                            </div>
+                          )}
                         </td>
                         <td className="p-3 text-center font-mono font-bold text-indigo-700 bg-indigo-50/30">
                           {w.weightPercentage}%
                         </td>
                         <td className="p-3 text-right font-mono font-bold text-slate-900 bg-slate-50/50">
-                          {formatCurrency(weekTarget)}
+                          {wd.isFullAbsence ? (
+                            <span className="text-amber-800 font-bold">R$ 0,00</span>
+                          ) : (
+                            formatCurrency(wd.adjustedWeekTarget)
+                          )}
                         </td>
                         <td className="p-3 text-right font-mono text-emerald-700 font-bold">
-                          {formatCurrency(dailyTarget)}
+                          {formatCurrency(wd.daily)}
                         </td>
                         {hasTicket && (
                           <td className="p-3 text-right font-mono text-slate-800">
-                            ~{wClients} atend.
+                            {wd.isFullAbsence ? '-' : `~${wClients} atend.`}
                           </td>
                         )}
                         {hasTicket && (
                           <td className="p-3 text-right font-mono font-bold text-purple-700 bg-purple-50/30">
-                            ~{dailyClients}/dia
+                            {wd.isFullAbsence ? '-' : `~${dailyClients}/dia`}
                           </td>
                         )}
                       </tr>

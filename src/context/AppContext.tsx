@@ -1973,7 +1973,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ? sellers.filter((s) => s.companyId === seller.companyId && s.branchId === seller.branchId && s.active)
       : [];
 
-    return calculateSellerGoalDetail(seller, masterGoal, unitSales, unitSellers);
+    return calculateSellerGoalDetail(
+      seller,
+      masterGoal,
+      unitSales,
+      unitSellers,
+      availabilities,
+      workingDaysSettings
+    );
   };
 
   const getTeamParticipation = (branchId?: string, customMonthlyTarget?: number): TeamParticipationSummary => {

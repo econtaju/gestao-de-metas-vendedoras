@@ -1,7 +1,18 @@
 import React, { useState } from 'react';
-import { Layers, Award, Sparkles, Sliders, ChevronDown, CheckCircle2, Building2 } from 'lucide-react';
+import {
+  Layers,
+  Award,
+  Sparkles,
+  Sliders,
+  ChevronDown,
+  CheckCircle2,
+  Building2,
+  Palmtree,
+  Clock,
+} from 'lucide-react';
 import { CommercialWeekPeriod, Seller, GoalLevel } from '../../types';
 import { formatCurrency } from '../../services/financialEngine';
+import { getSellerIntervalAvailability } from '../../services/availabilityEngine';
 import { useApp } from '../../context/AppContext';
 
 interface WeeklySellerLevelsMatrixProps {
@@ -10,6 +21,8 @@ interface WeeklySellerLevelsMatrixProps {
   sellers: Seller[];
   activeLevels: GoalLevel[];
   branchName: string;
+  monthNumber?: number;
+  year?: number;
 }
 
 export const WeeklySellerLevelsMatrix: React.FC<WeeklySellerLevelsMatrixProps> = ({
@@ -18,8 +31,10 @@ export const WeeklySellerLevelsMatrix: React.FC<WeeklySellerLevelsMatrixProps> =
   sellers,
   activeLevels,
   branchName,
+  monthNumber = 9,
+  year = 2026,
 }) => {
-  const { activeCompany, updateCompany } = useApp();
+  const { activeCompany, updateCompany, availabilities, workingDaysSettings } = useApp();
   const [selectedWeekNumber, setSelectedWeekNumber] = useState<number>(1);
   const [editingLevelNames, setEditingLevelNames] = useState<boolean>(false);
   const [levelNames, setLevelNames] = useState<string[]>(() =>
@@ -193,15 +208,48 @@ export const WeeklySellerLevelsMatrix: React.FC<WeeklySellerLevelsMatrixProps> =
                 const sharePct = seller.officialSharePercentage ?? (100 / sellers.length);
                 const sellerBaseWeekTarget = Math.round(weekUnitTarget * (sharePct / 100));
 
+                const mStr = String(monthNumber || 9).padStart(2, '0');
+                const yr = year || 2026;
+                const startDateStr =
+                  selectedWeek?.startDate ||
+                  `${yr}-${mStr}-${String(selectedWeek?.startDay || 1).padStart(2, '0')}`;
+                const endDateStr =
+                  selectedWeek?.endDate ||
+                  `${yr}-${mStr}-${String(selectedWeek?.endDay || 7).padStart(2, '0')}`;
+
+                const avail = getSellerIntervalAvailability(
+                  seller.id,
+                  startDateStr,
+                  endDateStr,
+                  availabilities || [],
+                  workingDaysSettings
+                );
+
+                const isFullAbsence = avail.factor === 0 && avail.daysExpected > 0;
+                const isPartialAbsence = avail.factor > 0 && avail.factor < 1;
+                const sellerAdjustedWeekTarget = Math.round(sellerBaseWeekTarget * avail.factor);
+
                 return (
-                  <tr key={seller.id} className="hover:bg-slate-50/80 transition-colors">
+                  <tr key={seller.id} className={`hover:bg-slate-50/80 transition-colors ${isFullAbsence ? 'bg-amber-50/30' : ''}`}>
                     <td className="p-3 font-bold text-slate-900">
                       <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-black text-[10px]">
+                        <div className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-black text-[10px] shrink-0">
                           {seller.name.charAt(0)}
                         </div>
-                        <span>{seller.name}</span>
+                        <span className="truncate">{seller.name}</span>
                       </div>
+                      {isFullAbsence && (
+                        <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold">
+                          <Palmtree className="w-3 h-3 text-amber-700" />
+                          <span>De Férias nesta semana (0 dias)</span>
+                        </div>
+                      )}
+                      {isPartialAbsence && (
+                        <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 text-[9px] font-bold">
+                          <Clock className="w-2.5 h-2.5 text-amber-700" />
+                          <span>Férias parciais ({avail.daysAvailable}/{avail.daysExpected} dias)</span>
+                        </div>
+                      )}
                     </td>
 
                     <td className="p-3 text-center font-mono font-bold text-indigo-700 bg-indigo-50/30">
@@ -210,22 +258,26 @@ export const WeeklySellerLevelsMatrix: React.FC<WeeklySellerLevelsMatrixProps> =
 
                     {activeLevels.map((lvl, idx) => {
                       const ratio = levelRatios[idx] || 1;
-                      const levelTarget = Math.round(sellerBaseWeekTarget * ratio);
+                      const levelTarget = Math.round(sellerAdjustedWeekTarget * ratio);
                       return (
                         <td key={lvl.level} className="p-3 text-right font-mono font-bold">
-                          <span
-                            className={`px-2 py-1 rounded-lg ${
-                              idx === 0
-                                ? 'bg-slate-100 text-slate-800'
-                                : idx === 1
-                                ? 'bg-blue-50 text-blue-800'
-                                : idx === 2
-                                ? 'bg-emerald-50 text-emerald-800'
-                                : 'bg-purple-50 text-purple-800'
-                            }`}
-                          >
-                            {formatCurrency(levelTarget)}
-                          </span>
+                          {isFullAbsence ? (
+                            <span className="text-amber-800 font-bold text-xs">R$ 0,00</span>
+                          ) : (
+                            <span
+                              className={`px-2 py-1 rounded-lg ${
+                                idx === 0
+                                  ? 'bg-slate-100 text-slate-800'
+                                  : idx === 1
+                                  ? 'bg-blue-50 text-blue-800'
+                                  : idx === 2
+                                  ? 'bg-emerald-50 text-emerald-800'
+                                  : 'bg-purple-50 text-purple-800'
+                              }`}
+                            >
+                              {formatCurrency(levelTarget)}
+                            </span>
+                          )}
                         </td>
                       );
                     })}

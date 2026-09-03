@@ -44,6 +44,7 @@ import { GoalMatrixGrid } from './GoalMatrixGrid';
 import { GoalSimulatorModal } from './GoalSimulatorModal';
 import { WeeklySellerLevelsMatrix } from './WeeklySellerLevelsMatrix';
 import { GoalConflictModal } from './GoalConflictModal';
+import { ReplicateMonthlySharesModal } from './ReplicateMonthlySharesModal';
 import {
   MonthlyMasterGoal,
   CommercialWeekPeriod,
@@ -56,6 +57,7 @@ import {
   buildCommercialWeeks,
   validateWeeklyWeights,
   suggestWeeklyWeightsFromHistory,
+  replicateSharesToOtherMonths,
 } from '../../services/masterGoalEngine';
 import { formatCurrency, getActiveLevels } from '../../services/financialEngine';
 
@@ -254,6 +256,24 @@ export const GoalGenerator: React.FC = () => {
     return result;
   }, [monthlyTarget, levelGrowthRates, manualLevelValues, activeCompany]);
 
+  // Vendedores da filial ativa (com fallback inteligente para todas as vendedoras da empresa se a filial específica não tiver vendedoras cadastradas)
+  const branchSellers = useMemo(() => {
+    if (selectedBranchId === 'all' || companyBranches.length <= 1) {
+      return companySellers.filter((s) => s.active);
+    }
+    const filtered = companySellers.filter((s) => s.branchId === selectedBranchId && s.active);
+    if (filtered.length > 0) return filtered;
+    return companySellers.filter((s) => s.active);
+  }, [companySellers, selectedBranchId, companyBranches.length]);
+
+  // Resumo de participação da equipe
+  const teamSummary = useMemo(() => {
+    return getTeamParticipation(selectedBranchId, monthlyTarget);
+  }, [getTeamParticipation, selectedBranchId, branchSellers, monthlyTarget]);
+
+  // Validação geral dos pesos semanais
+  const weeklyWeightsValidation = validateWeeklyWeights(weeks);
+
   // Sincroniza dados sempre que o Mês, Ano ou Unidade mudar
   useEffect(() => {
     const key = `${activeCompany.id}-${selectedBranchId}-${selectedYear}-${selectedMonthNumber}`;
@@ -277,6 +297,13 @@ export const GoalGenerator: React.FC = () => {
       } else {
         setManualLevelValues({});
       }
+
+      // Restaura as porcentagens personalizadas das vendedoras deste mês (se existirem)
+      if (currentMaster.sellerShares && Object.keys(currentMaster.sellerShares).length > 0) {
+        Object.entries(currentMaster.sellerShares).forEach(([sellerId, share]) => {
+          updateSellerShare(sellerId, share, 'adjusted');
+        });
+      }
     } else {
       const baseTarget = activeCompany.levels[0]?.revenueTarget || 0;
       setMonthlyTarget(baseTarget);
@@ -299,6 +326,13 @@ export const GoalGenerator: React.FC = () => {
       } else {
         setLevelGrowthRates([0, 15, 10, 10]);
       }
+
+      // Se a empresa possui padrão salvo de participação da equipe, aplica automaticamente para o mês novo
+      if (activeCompany.defaultSellerShares && Object.keys(activeCompany.defaultSellerShares).length > 0) {
+        Object.entries(activeCompany.defaultSellerShares).forEach(([sellerId, share]) => {
+          updateSellerShare(sellerId, share, 'adjusted');
+        });
+      }
     }
   }, [selectedMonthNumber, selectedYear, selectedBranchId, activeCompany.id]);
 
@@ -310,6 +344,11 @@ export const GoalGenerator: React.FC = () => {
         'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
       ];
       const monthName = monthNames[selectedMonthNumber - 1];
+
+      const currentShares: Record<string, number> = (teamSummary.sellers || []).reduce((acc, s) => {
+        acc[s.sellerId] = s.officialSharePercentage;
+        return acc;
+      }, {} as Record<string, number>);
 
       const masterGoalToSave: MonthlyMasterGoal = {
         id: existingMaster?.id || `goal-${activeCompany.id}-${selectedBranchId}-${selectedYear}-${selectedMonthNumber}`,
@@ -329,6 +368,8 @@ export const GoalGenerator: React.FC = () => {
         status: existingMaster?.status || 'draft',
         levels: calculatedLevels,
         levelGrowthPercentages: levelGrowthRates,
+        sellerShares: currentShares,
+        defaultSellerShares: activeCompany.defaultSellerShares || existingMaster?.defaultSellerShares,
         updatedAt: new Date().toISOString(),
       };
 
@@ -341,14 +382,15 @@ export const GoalGenerator: React.FC = () => {
         JSON.stringify(currentGlobal.weeks) !== JSON.stringify(weeks) ||
         currentGlobal.numberOfWeeks !== numberOfWeeks ||
         currentGlobal.templateUsed !== selectedTemplateId ||
-        JSON.stringify(currentGlobal.levels) !== JSON.stringify(calculatedLevels)
+        JSON.stringify(currentGlobal.levels) !== JSON.stringify(calculatedLevels) ||
+        JSON.stringify(currentGlobal.sellerShares) !== JSON.stringify(currentShares)
       ) {
         saveMasterGoal(masterGoalToSave);
       }
     }, 800);
 
     return () => clearTimeout(delayDebounceId);
-  }, [monthlyTarget, weeks, numberOfWeeks, selectedTemplateId, selectedMonthNumber, selectedYear, selectedBranchId, activeCompany.id, calculatedLevels, levelGrowthRates]);
+  }, [monthlyTarget, weeks, numberOfWeeks, selectedTemplateId, selectedMonthNumber, selectedYear, selectedBranchId, activeCompany.id, calculatedLevels, levelGrowthRates, teamSummary]);
 
   const handleMonthlyTargetChange = (val: number) => {
     const safeVal = Math.max(0, Math.round(val));
@@ -563,17 +605,6 @@ export const GoalGenerator: React.FC = () => {
     setSelectedTemplateId(undefined);
   };
 
-  // Vendedores da filial ativa (com fallback inteligente para todas as vendedoras da empresa se a filial específica não tiver vendedoras cadastradas)
-  const branchSellers = useMemo(() => {
-    if (selectedBranchId === 'all' || companyBranches.length <= 1) {
-      return companySellers.filter((s) => s.active);
-    }
-    const filtered = companySellers.filter((s) => s.branchId === selectedBranchId && s.active);
-    if (filtered.length > 0) return filtered;
-    // Fallback: Se a filial selecionada estiver sem vendedoras mas existirem vendedoras na empresa, lista as vendedoras da empresa
-    return companySellers.filter((s) => s.active);
-  }, [companySellers, selectedBranchId, companyBranches.length]);
-
   // Função para adicionar logs de auditoria
   const addAuditLog = (
     action: GoalChangeLog['action'],
@@ -615,11 +646,6 @@ export const GoalGenerator: React.FC = () => {
     setTimeout(() => setSaveSuccessMessage(null), 3000);
   };
 
-  // Resumo de participação da equipe
-  const teamSummary = useMemo(() => {
-    return getTeamParticipation(selectedBranchId, monthlyTarget);
-  }, [getTeamParticipation, selectedBranchId, branchSellers, monthlyTarget]);
-
   // Participação individual handlers
   const handleSellerShareChange = (sellerId: string, newShare: number) => {
     const seller = branchSellers.find((s) => s.id === sellerId);
@@ -657,8 +683,86 @@ export const GoalGenerator: React.FC = () => {
     addAuditLog('update_shares', 'Participação histórica aplicada para a equipe comercial');
   };
 
+  // Salvar padrão oficial da equipe
+  const handleSaveAsTeamDefault = () => {
+    const currentShares: Record<string, number> = (teamSummary.sellers || []).reduce((acc, s) => {
+      acc[s.sellerId] = s.officialSharePercentage;
+      return acc;
+    }, {} as Record<string, number>);
+
+    updateCompany(activeCompany.id, {
+      defaultSellerShares: currentShares,
+    });
+
+    addAuditLog(
+      'update_shares',
+      `Padrão de participação da equipe (${teamSummary.sellers.length} vendedoras) salvo como padrão oficial da empresa.`
+    );
+
+    setSaveSuccessMessage('Padrão de participação da equipe salvo como padrão oficial!');
+    setTimeout(() => setSaveSuccessMessage(null), 3500);
+  };
+
+  // Carregar padrão oficial da equipe
+  const handleLoadTeamDefault = () => {
+    const defaultShares = activeCompany.defaultSellerShares || existingMaster?.defaultSellerShares;
+    if (!defaultShares || Object.keys(defaultShares).length === 0) return;
+
+    Object.entries(defaultShares).forEach(([sellerId, share]) => {
+      updateSellerShare(sellerId, share, 'adjusted');
+    });
+
+    addAuditLog(
+      'update_shares',
+      'Padrão pré-configurado de participação da equipe aplicado.'
+    );
+
+    setSaveSuccessMessage('Padrão pré-configurado da equipe aplicado com sucesso!');
+    setTimeout(() => setSaveSuccessMessage(null), 3500);
+  };
+
+  // Modal de replicação para outros meses
+  const [isReplicateModalOpen, setIsReplicateModalOpen] = useState<boolean>(false);
+
+  const handleConfirmReplication = (
+    targetMonths: number[],
+    replicateTargetToo: boolean,
+    monthlyTargetToReplicate?: number
+  ) => {
+    const currentShares: Record<string, number> = (teamSummary.sellers || []).reduce((acc, s) => {
+      acc[s.sellerId] = s.officialSharePercentage;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const updatedGoals = replicateSharesToOtherMonths(
+      activeCompany.id,
+      selectedBranchId,
+      selectedYear,
+      targetMonths,
+      currentShares,
+      masterGoals,
+      {
+        replicateTargetToo,
+        monthlyTargetToReplicate,
+        userName: currentUser?.name || 'Consultor',
+      }
+    );
+
+    // Grava cada mês atualizado no contexto
+    Object.values(updatedGoals).forEach((goal) => {
+      saveMasterGoal(goal);
+    });
+
+    addAuditLog(
+      'update_shares',
+      `Padrão de participação da equipe replicado para ${targetMonths.length} meses de ${selectedYear}.`
+    );
+
+    setSaveSuccessMessage(`Padrão replicado com sucesso para ${targetMonths.length} ${targetMonths.length === 1 ? 'mês' : 'meses'}!`);
+    setTimeout(() => setSaveSuccessMessage(null), 4000);
+  };
+
   // Validação geral
-  const weeklyWeightsValidation = validateWeeklyWeights(weeks);
   const isGoalFormValid = weeklyWeightsValidation.isValid && teamSummary.isValid;
 
   const activeLevels = useMemo(
@@ -690,6 +794,11 @@ export const GoalGenerator: React.FC = () => {
       newMonthlyTarget: finalMonthlyTarget,
     });
 
+    const currentShares: Record<string, number> = (teamSummary.sellers || []).reduce((acc, s) => {
+      acc[s.sellerId] = s.officialSharePercentage;
+      return acc;
+    }, {} as Record<string, number>);
+
     const masterGoalToSave: MonthlyMasterGoal = {
       id: existingMaster?.id || `goal-${activeCompany.id}-${selectedBranchId}-${selectedYear}-${selectedMonthNumber}`,
       companyId: activeCompany.id,
@@ -712,6 +821,8 @@ export const GoalGenerator: React.FC = () => {
       status: actionType === 'publish' ? 'published' : (existingMaster?.status || 'draft'),
       levels: calculatedLevels,
       levelGrowthPercentages: levelGrowthRates,
+      sellerShares: currentShares,
+      defaultSellerShares: activeCompany.defaultSellerShares || existingMaster?.defaultSellerShares,
       changeLogs: updatedLogs,
       updatedAt: new Date().toISOString(),
       publishedAt: actionType === 'publish' ? new Date().toISOString() : existingMaster?.publishedAt,
@@ -1345,7 +1456,13 @@ export const GoalGenerator: React.FC = () => {
         onRedistributeProportionally={handleRedistributeProportionally}
         onSetEqualDistribution={handleSetEqualDistribution}
         onApplyHistoricalShares={handleApplyHistoricalShares}
+        onSaveAsTeamDefault={handleSaveAsTeamDefault}
+        onLoadTeamDefault={handleLoadTeamDefault}
+        onOpenReplicateModal={() => setIsReplicateModalOpen(true)}
+        hasSavedTeamDefault={Boolean(activeCompany.defaultSellerShares && Object.keys(activeCompany.defaultSellerShares).length > 0)}
         monthlyTarget={monthlyTarget}
+        monthNumber={selectedMonthNumber}
+        year={selectedYear}
       />
 
       {/* 5. MATRIZ DE METAS (VENDEDORES × SEMANAS) */}
@@ -1356,6 +1473,7 @@ export const GoalGenerator: React.FC = () => {
         branchName={activeBranch?.name || 'Unidade Principal'}
         monthName={ALL_MONTHS.find((m) => m.number === selectedMonthNumber)?.name || 'Mês'}
         year={selectedYear}
+        monthNumber={selectedMonthNumber}
       />
 
       {/* 6. NÍVEIS DA SEMANA POR VENDEDORA (NÍVEIS SEMANAIS DA EQUIPE) */}
@@ -1365,6 +1483,8 @@ export const GoalGenerator: React.FC = () => {
         sellers={branchSellers}
         activeLevels={activeLevels}
         branchName={activeBranch?.name || 'Unidade Principal'}
+        monthNumber={selectedMonthNumber}
+        year={selectedYear}
       />
 
       {/* 7. HISTÓRICO DE ALTERAÇÕES & LOGS DE AUDITORIA */}
@@ -1652,6 +1772,26 @@ export const GoalGenerator: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Modal de Replicação de Metas para Outros Meses */}
+      <ReplicateMonthlySharesModal
+        isOpen={isReplicateModalOpen}
+        onClose={() => setIsReplicateModalOpen(false)}
+        sourceMonthNumber={selectedMonthNumber}
+        sourceMonthName={ALL_MONTHS.find((m) => m.number === selectedMonthNumber)?.name || 'Mês'}
+        sourceYear={selectedYear}
+        sourceMonthlyTarget={monthlyTarget}
+        sellers={(teamSummary.sellers || []).map((s) => ({
+          sellerId: s.sellerId,
+          sellerName: s.sellerName,
+          officialSharePercentage: s.officialSharePercentage,
+        }))}
+        existingMasterGoals={masterGoals}
+        companyId={activeCompany.id}
+        branchId={selectedBranchId}
+        branchName={activeBranch?.name || 'Unidade Principal'}
+        onConfirmReplication={handleConfirmReplication}
+      />
     </div>
   );
 };

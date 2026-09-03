@@ -62,6 +62,7 @@ export interface Company {
   commissionRuleType?: 'monthly' | 'weekly'; // Regra A — Comissão mensal vs Regra B — Comissão semanal
   levels: GoalLevel[];
   levelGrowthPercentages?: number[]; // Padrão de crescimento entre níveis (ex: [0, 15, 10, 10])
+  defaultSellerShares?: Record<string, number>; // Padrão oficial pré-configurado de % por vendedora
   financialSettings: FinancialSettings;
   notes?: string;
   active: boolean;
@@ -599,6 +600,8 @@ export interface MonthlyMasterGoal {
   status: 'draft' | 'published';
   levels?: GoalLevel[];
   levelGrowthPercentages?: number[];
+  sellerShares?: Record<string, number>; // Participação de cada vendedor (%) configurada neste mês específico
+  defaultSellerShares?: Record<string, number>; // Padrão pré-configurado da equipe
   publishedAt?: string;
   updatedAt: string;
   changeLogs?: GoalChangeLog[];
@@ -636,6 +639,11 @@ export interface SellerWeeklyGoalBreakdown {
   averageTicket: number;
   estimatedRequiredSales: number;
   remainingRequiredSales: number;
+  daysExpected?: number; // Total de dias úteis esperados na semana
+  daysAvailable?: number; // Total de dias úteis efetivamente trabalhados (descontando férias)
+  availabilityFactor?: number; // Proporção 0..1 de dias trabalhados
+  isAbsent?: boolean; // Se estava de férias/afastada na semana inteira
+  absenceReason?: string; // Motivo do afastamento (ex: 'Férias')
 }
 
 export interface SellerGoalDetail {

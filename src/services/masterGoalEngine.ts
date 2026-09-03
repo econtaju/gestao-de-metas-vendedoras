@@ -10,9 +10,16 @@ import {
   Company,
   Branch,
   FinancialSettings,
+  SellerAvailability,
+  WorkingDaysSettings,
+  GoalChangeLog,
 } from '../types';
 import { MONTH_NAMES } from './intelligenceEngine';
 import { formatCurrency, formatPercent } from './financialEngine';
+import {
+  getSellerIntervalAvailability,
+  DEFAULT_WORKING_DAYS_SETTINGS,
+} from './availabilityEngine';
 
 // =========================================================================
 // 1. TEMPLATES DE PESOS SEMANAIS PADRÃO
@@ -499,23 +506,22 @@ export function calculateSellerGoalDetail(
   seller: Seller,
   masterGoal: MonthlyMasterGoal,
   companySales: SaleRecord[] = [],
-  allUnitSellers: Seller[] = []
+  allUnitSellers: Seller[] = [],
+  availabilities: SellerAvailability[] = [],
+  workingDaysSettings: WorkingDaysSettings = DEFAULT_WORKING_DAYS_SETTINGS
 ): SellerGoalDetail {
   const safeCompanySales = Array.isArray(companySales) ? companySales : [];
   const officialShare = seller.officialSharePercentage ?? 25;
   const historicalShare = seller.historicalSharePercentage ?? officialShare;
   const shareOriginType = seller.shareOriginType ?? 'adjusted';
 
-  // Meta Mensal Individual = Meta Mensal da Unidade * (Participação Oficial / 100)
-  const monthlyTarget = Math.round((masterGoal.monthlyTarget * (officialShare / 100)) * 100) / 100;
+  // Meta Mensal Individual Base = Meta Mensal da Unidade * (Participação Oficial / 100)
+  const baseMonthlyTarget = Math.round((masterGoal.monthlyTarget * (officialShare / 100)) * 100) / 100;
 
   // Vendas do vendedor no período
   const sellerSales = safeCompanySales.filter((s) => s.sellerId === seller.id);
   const realizedRevenue = sellerSales.reduce((acc, s) => acc + s.revenue, 0);
   const totalSalesCount = sellerSales.reduce((acc, s) => acc + (s.salesCount || 1), 0);
-
-  const achievementPercentage = monthlyTarget > 0 ? (realizedRevenue / monthlyTarget) * 100 : 0;
-  const remainingToTarget = Math.max(0, monthlyTarget - realizedRevenue);
 
   // Ticket Médio
   const currentMonthAverageTicket = totalSalesCount > 0 ? realizedRevenue / totalSalesCount : (seller.averageTicket || 300);
@@ -526,25 +532,31 @@ export function calculateSellerGoalDetail(
 
   const currentAverageTicket = currentMonthAverageTicket > 0 ? currentMonthAverageTicket : (seller.averageTicket || 300);
 
-  // Vendas Necessárias = Meta Restante / Ticket Médio
-  const requiredSalesTotal = currentAverageTicket > 0 ? Math.ceil(remainingToTarget / currentAverageTicket) : 0;
-
-  // Participação Real no Mês vs Planejada
-  const totalUnitRealized = safeCompanySales
-    .filter((s) => (masterGoal.branchId === 'all' || s.branchId === masterGoal.branchId))
-    .reduce((acc, s) => acc + s.revenue, 0);
-
-  const realShare = totalUnitRealized > 0
-    ? Math.round((realizedRevenue / totalUnitRealized) * 1000) / 10
-    : 0;
-
-  const shareDiffPoints = Math.round((realShare - officialShare) * 10) / 10;
-
-  // Breakdown Semanal
+  // Breakdown Semanal considerando Férias e Afastamentos
   const masterWeeks = Array.isArray(masterGoal?.weeks) ? masterGoal.weeks : [];
   const weeklyBreakdown = masterWeeks.map((week) => {
-    // Meta Semanal da Vendedora = Meta Mensal Vendedor * (Peso Semana / 100)
-    const weeklyTarget = Math.round((monthlyTarget * (week.weightPercentage / 100)) * 100) / 100;
+    const mStr = String(masterGoal.monthNumber || 9).padStart(2, '0');
+    const startDateStr =
+      week.startDate ||
+      `${masterGoal.year || 2026}-${mStr}-${String(week.startDay || 1).padStart(2, '0')}`;
+    const endDateStr =
+      week.endDate ||
+      `${masterGoal.year || 2026}-${mStr}-${String(week.endDay || 7).padStart(2, '0')}`;
+
+    const avail = getSellerIntervalAvailability(
+      seller.id,
+      startDateStr,
+      endDateStr,
+      availabilities,
+      workingDaysSettings
+    );
+
+    // Meta Semanal Base = Meta Mensal Base * (Peso da Semana / 100)
+    const baseWeeklyTarget = Math.round((baseMonthlyTarget * (week.weightPercentage / 100)) * 100) / 100;
+    // Meta Semanal Efetiva: multiplicada pela proporção de dias úteis trabalhados
+    const weeklyTarget = Math.round(baseWeeklyTarget * avail.factor * 100) / 100;
+    const isAbsent = avail.factor === 0 && avail.daysExpected > 0;
+    const absenceReason = avail.activeAbsences[0]?.notes || (isAbsent ? 'Férias' : undefined);
 
     // Vendas da semana (semana comercial correspondente)
     const weekSales = sellerSales.filter((s) => {
@@ -580,8 +592,34 @@ export function calculateSellerGoalDetail(
       averageTicket: Math.round(weekAvgTicket * 100) / 100,
       estimatedRequiredSales,
       remainingRequiredSales,
+      daysExpected: avail.daysExpected,
+      daysAvailable: avail.daysAvailable,
+      availabilityFactor: avail.factor,
+      isAbsent,
+      absenceReason,
     };
   });
+
+  // Se a vendedora tiver semanas de férias, a meta mensal individual efetiva é a soma das semanas ativas
+  const hasAbsencesInMonth = weeklyBreakdown.some((w) => (w.availabilityFactor ?? 1) < 1);
+  const monthlyTarget = hasAbsencesInMonth
+    ? Math.round(weeklyBreakdown.reduce((acc, w) => acc + w.weeklyTarget, 0) * 100) / 100
+    : baseMonthlyTarget;
+
+  const achievementPercentage = monthlyTarget > 0 ? (realizedRevenue / monthlyTarget) * 100 : 0;
+  const remainingToTarget = Math.max(0, monthlyTarget - realizedRevenue);
+  const requiredSalesTotal = currentAverageTicket > 0 ? Math.ceil(remainingToTarget / currentAverageTicket) : 0;
+
+  // Participação Real no Mês vs Planejada
+  const totalUnitRealized = safeCompanySales
+    .filter((s) => (masterGoal.branchId === 'all' || s.branchId === masterGoal.branchId))
+    .reduce((acc, s) => acc + s.revenue, 0);
+
+  const realShare = totalUnitRealized > 0
+    ? Math.round((realizedRevenue / totalUnitRealized) * 1000) / 10
+    : 0;
+
+  const shareDiffPoints = Math.round((realShare - officialShare) * 10) / 10;
 
   // Ticket da semana atual (última com vendas ou primeira)
   const currentWeekObj = weeklyBreakdown.find((w) => w.salesCount > 0) || weeklyBreakdown[0];
@@ -634,6 +672,83 @@ export function calculateSellerGoalDetail(
     weeklyBreakdown,
     weeklyGoals: weeklyBreakdown,
   };
+}
+
+/**
+ * Replica uma distribuição de porcentagens de vendedoras para uma lista de meses selecionados,
+ * recalculando as metas semanais de cada mês proporcionalmente à meta mensal daquele mês.
+ */
+export function replicateSharesToOtherMonths(
+  companyId: string,
+  branchId: string,
+  year: number,
+  targetMonthNumbers: number[],
+  sellerShares: Record<string, number>,
+  existingMasterGoals: Record<string, MonthlyMasterGoal>,
+  options: {
+    replicateTargetToo?: boolean;
+    monthlyTargetToReplicate?: number;
+    userName?: string;
+  } = {}
+): Record<string, MonthlyMasterGoal> {
+  const updatedGoals = { ...existingMasterGoals };
+  const monthNames = [
+    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+  ];
+
+  targetMonthNumbers.forEach((monthNum) => {
+    const key = `${companyId}-${branchId}-${year}-${monthNum}`;
+    const existing = updatedGoals[key];
+    const target = (options.replicateTargetToo && options.monthlyTargetToReplicate)
+      ? options.monthlyTargetToReplicate
+      : (existing?.monthlyTarget || 200000);
+
+    const numberOfWeeks = existing?.numberOfWeeks || 4;
+    const defaultWeights = numberOfWeeks === 5 ? [15, 20, 20, 25, 20] : [15, 20, 25, 40];
+    const currentWeeks = existing?.weeks && existing.weeks.length > 0
+      ? existing.weeks
+      : buildCommercialWeeks(year, monthNum, numberOfWeeks, defaultWeights, target);
+
+    const weeks = currentWeeks.map((w) => ({
+      ...w,
+      revenueTarget: Math.round(target * (w.weightPercentage / 100)),
+      targetAmount: Math.round(target * (w.weightPercentage / 100)),
+    }));
+
+    const newLog: GoalChangeLog = {
+      id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      timestamp: new Date().toISOString(),
+      userName: options.userName || 'Consultor',
+      action: 'update_shares',
+      description: `Replicação de padrão de participação da equipe (${Object.keys(sellerShares).length} vendedoras) para ${monthNames[monthNum - 1]}/${year}.`,
+    };
+
+    updatedGoals[key] = {
+      id: existing?.id || `goal-${companyId}-${branchId}-${year}-${monthNum}`,
+      companyId,
+      branchId,
+      branchName: existing?.branchName || (branchId === 'all' ? 'Toda a Empresa (Consolidado)' : 'Unidade Principal'),
+      year,
+      monthNumber: monthNum,
+      monthName: monthNames[monthNum - 1],
+      monthlyTarget: target,
+      numberOfWeeks,
+      weeks,
+      totalWeight: weeks.reduce((acc, w) => acc + w.weightPercentage, 0),
+      isValid: true,
+      templateUsed: existing?.templateUsed,
+      commissionRuleType: existing?.commissionRuleType || 'monthly',
+      status: existing?.status || 'draft',
+      levels: existing?.levels,
+      levelGrowthPercentages: existing?.levelGrowthPercentages,
+      sellerShares: { ...sellerShares },
+      changeLogs: existing?.changeLogs ? [newLog, ...existing.changeLogs] : [newLog],
+      updatedAt: new Date().toISOString(),
+    };
+  });
+
+  return updatedGoals;
 }
 
 // =========================================================================

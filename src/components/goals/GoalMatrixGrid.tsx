@@ -8,9 +8,13 @@ import {
   Printer,
   ChevronRight,
   Sparkles,
+  Palmtree,
+  Clock,
+  AlertTriangle,
 } from 'lucide-react';
 import { CommercialWeekPeriod, TeamParticipationSummary, Company, Seller } from '../../types';
 import { formatCurrency } from '../../services/financialEngine';
+import { getSellerIntervalAvailability } from '../../services/availabilityEngine';
 import { SellerGoalCardModal } from './SellerGoalCardModal';
 import { useApp } from '../../context/AppContext';
 
@@ -21,6 +25,7 @@ interface GoalMatrixGridProps {
   branchName: string;
   monthName: string;
   year: number;
+  monthNumber?: number;
 }
 
 export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
@@ -30,8 +35,9 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
   branchName = 'Unidade',
   monthName = 'Mês',
   year = 2026,
+  monthNumber = 9,
 }) => {
-  const { activeCompany, companySellers } = useApp();
+  const { activeCompany, companySellers, availabilities, workingDaysSettings } = useApp();
   const safeSellers = Array.isArray(teamSummary?.sellers) ? teamSummary.sellers : [];
   const safeWeeks = Array.isArray(weeks) ? weeks : [];
 
@@ -55,7 +61,7 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
               Matriz de Metas Desdobradas ({monthName}/{year})
             </h3>
             <p className="text-xs text-slate-500">
-              Cálculo automático: <span className="font-mono font-medium text-slate-700">Meta Mensal × Peso da Semana × % do Vendedor</span> • Clique no vendedor para gerar o relatório individual (PDF / WhatsApp).
+              Cálculo inteligente com férias: <span className="font-mono font-medium text-slate-700">Meta Semanal × Proporção de Dias Úteis Trabalhados</span> • Semanas de férias ficam zeradas (R$ 0,00).
             </p>
           </div>
         </div>
@@ -75,9 +81,9 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
               <tr className="bg-slate-800 text-white font-semibold">
                 <th className="py-3.5 px-4 min-w-[200px]">Vendedor(a)</th>
                 <th className="py-3.5 px-3 text-center min-w-[80px]">Part. (%)</th>
-                <th className="py-3.5 px-4 text-right min-w-[120px] bg-slate-900">Meta Mês (R$)</th>
+                <th className="py-3.5 px-4 text-right min-w-[130px] bg-slate-900">Meta Mês (R$)</th>
                 {safeWeeks.map((week) => (
-                  <th key={week.weekNumber} className="py-3.5 px-4 text-center min-w-[130px] border-l border-slate-700">
+                  <th key={week.weekNumber} className="py-3.5 px-4 text-center min-w-[140px] border-l border-slate-700">
                     <div>Semana {week.weekNumber}</div>
                     <div className="text-[10px] font-normal text-slate-300">
                       Peso: <span className="font-bold text-amber-300">{week.weightPercentage}%</span> ({week.label || week.dateRangeLabel || `Semana ${week.weekNumber}`})
@@ -100,16 +106,73 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
                 </tr>
               ) : (
                 safeSellers.map((seller, idx) => {
-                  const sellerMonthlyTarget = Math.round(monthlyTarget * (seller.officialSharePercentage / 100));
+                  const baseMonthlyTarget = Math.round(monthlyTarget * (seller.officialSharePercentage / 100));
+
+                  // Calcula os dados semana a semana levando em conta férias e dias úteis
+                  const weekCalcs = safeWeeks.map((week) => {
+                    const mStr = String(monthNumber || 9).padStart(2, '0');
+                    const startDateStr =
+                      week.startDate ||
+                      `${year}-${mStr}-${String(week.startDay || 1).padStart(2, '0')}`;
+                    const endDateStr =
+                      week.endDate ||
+                      `${year}-${mStr}-${String(week.endDay || 7).padStart(2, '0')}`;
+
+                    const avail = getSellerIntervalAvailability(
+                      seller.sellerId,
+                      startDateStr,
+                      endDateStr,
+                      availabilities || [],
+                      workingDaysSettings
+                    );
+
+                    const baseWeekTarget = Math.round(
+                      monthlyTarget * (week.weightPercentage / 100) * (seller.officialSharePercentage / 100)
+                    );
+
+                    // Ajuste proporcional por dias úteis
+                    const adjustedWeekTarget = Math.round(baseWeekTarget * avail.factor);
+                    const workedDays = avail.daysAvailable;
+                    const expectedDays = avail.daysExpected;
+                    const isFullAbsence = avail.factor === 0 && expectedDays > 0;
+                    const isPartialAbsence = avail.factor > 0 && avail.factor < 1;
+                    const dailyTarget = workedDays > 0 ? Math.round(adjustedWeekTarget / workedDays) : 0;
+
+                    return {
+                      week,
+                      avail,
+                      baseWeekTarget,
+                      adjustedWeekTarget,
+                      workedDays,
+                      expectedDays,
+                      isFullAbsence,
+                      isPartialAbsence,
+                      dailyTarget,
+                    };
+                  });
+
+                  // Meta Mensal Efetiva: soma das semanas ativas trabalhadas
+                  const hasAbsences = weekCalcs.some((wc) => wc.isFullAbsence || wc.isPartialAbsence);
+                  const effectiveSellerMonthlyTarget = weekCalcs.reduce((acc, wc) => acc + wc.adjustedWeekTarget, 0);
+                  const totalWorkedDaysInMonth = weekCalcs.reduce((acc, wc) => acc + wc.workedDays, 0);
+                  const totalExpectedDaysInMonth = weekCalcs.reduce((acc, wc) => acc + wc.expectedDays, 0);
 
                   return (
                     <tr key={seller.sellerId} className={idx % 2 === 0 ? 'bg-white hover:bg-slate-50' : 'bg-slate-50/50 hover:bg-slate-100/60'}>
                       {/* Nome do Vendedor */}
-                      <td className="py-3 px-4 font-semibold text-slate-900 flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 font-bold text-[11px] flex items-center justify-center">
-                          {seller.sellerName.charAt(0)}
-                        </span>
-                        <span>{seller.sellerName}</span>
+                      <td className="py-3 px-4 font-semibold text-slate-900">
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 font-bold text-[11px] flex items-center justify-center shrink-0">
+                            {seller.sellerName.charAt(0)}
+                          </span>
+                          <span className="truncate">{seller.sellerName}</span>
+                        </div>
+                        {hasAbsences && (
+                          <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold">
+                            <Palmtree className="w-3 h-3 text-amber-700" />
+                            <span>Férias ({totalWorkedDaysInMonth}/{totalExpectedDaysInMonth} dias trab.)</span>
+                          </div>
+                        )}
                       </td>
 
                       {/* % de Participação */}
@@ -118,27 +181,63 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
                       </td>
 
                       {/* Meta Mensal Individual */}
-                      <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 bg-slate-100/60">
-                        {formatCurrency(sellerMonthlyTarget)}
+                      <td className="py-3 px-4 text-right font-mono font-bold bg-slate-100/60">
+                        <div className="text-slate-900 text-sm">
+                          {formatCurrency(effectiveSellerMonthlyTarget)}
+                        </div>
+                        {hasAbsences && (
+                          <div className="text-[10px] text-slate-400 font-normal line-through">
+                            Base: {formatCurrency(baseMonthlyTarget)}
+                          </div>
+                        )}
                       </td>
 
-                      {/* Semanas Comerciais 1..4 ou 1..5 */}
-                      {safeWeeks.map((week) => {
-                        const weekSellerTarget = Math.round(
-                          monthlyTarget * (week.weightPercentage / 100) * (seller.officialSharePercentage / 100)
-                        );
-                        const dayCount = (week.endDay && week.startDay)
-                          ? Math.max(1, week.endDay - week.startDay + 1)
-                          : 7;
-                        const dailyTarget = Math.round(weekSellerTarget / dayCount);
+                      {/* Semanas Comerciais 1..4 ou 1..5 com Proporção de Férias */}
+                      {weekCalcs.map((wc) => {
+                        if (wc.isFullAbsence) {
+                          return (
+                            <td
+                              key={wc.week.weekNumber}
+                              className="py-3 px-3 text-center border-l border-slate-200 bg-amber-50/40 font-mono"
+                            >
+                              <div className="font-bold text-amber-800 text-xs">
+                                R$ 0,00
+                              </div>
+                              <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-100/90 border border-amber-300 text-[10px] font-bold text-amber-900 shadow-2xs">
+                                <Palmtree className="w-3 h-3 text-amber-700" />
+                                <span>Férias (0 dias)</span>
+                              </div>
+                            </td>
+                          );
+                        }
+
+                        if (wc.isPartialAbsence) {
+                          return (
+                            <td
+                              key={wc.week.weekNumber}
+                              className="py-3 px-3 text-right border-l border-slate-200 bg-amber-50/20 font-mono"
+                            >
+                              <div className="font-bold text-slate-900 text-xs">
+                                {formatCurrency(wc.adjustedWeekTarget)}
+                              </div>
+                              <div className="text-[10px] text-slate-500 font-normal">
+                                ~{formatCurrency(wc.dailyTarget)}/dia
+                              </div>
+                              <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-amber-100/80 border border-amber-300 text-[9px] font-bold text-amber-900">
+                                <Clock className="w-2.5 h-2.5 text-amber-700" />
+                                <span>{wc.workedDays}/{wc.expectedDays} dias úteis</span>
+                              </div>
+                            </td>
+                          );
+                        }
 
                         return (
-                          <td key={week.weekNumber} className="py-3 px-4 text-right border-l border-slate-200 font-mono">
+                          <td key={wc.week.weekNumber} className="py-3 px-4 text-right border-l border-slate-200 font-mono">
                             <div className="font-bold text-slate-900 text-xs">
-                              {formatCurrency(weekSellerTarget)}
+                              {formatCurrency(wc.adjustedWeekTarget)}
                             </div>
                             <div className="text-[10px] text-slate-400 font-normal">
-                              ~{formatCurrency(dailyTarget)}/dia
+                              ~{formatCurrency(wc.dailyTarget)}/dia
                             </div>
                           </td>
                         );

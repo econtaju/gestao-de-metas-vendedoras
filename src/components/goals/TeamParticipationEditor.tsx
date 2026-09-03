@@ -11,6 +11,10 @@ import {
   RefreshCw,
   Info,
   Calendar,
+  Copy,
+  Star,
+  Zap,
+  Palmtree,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { TeamParticipationSummary, Seller } from '../../types';
@@ -22,7 +26,13 @@ interface TeamParticipationEditorProps {
   onRedistributeProportionally: (sellerId: string, newShare: number) => void;
   onSetEqualDistribution: () => void;
   onApplyHistoricalShares: () => void;
+  onSaveAsTeamDefault?: () => void;
+  onLoadTeamDefault?: () => void;
+  onOpenReplicateModal?: () => void;
+  hasSavedTeamDefault?: boolean;
   monthlyTarget: number;
+  monthNumber?: number;
+  year?: number;
 }
 
 export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = ({
@@ -31,9 +41,15 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
   onRedistributeProportionally,
   onSetEqualDistribution,
   onApplyHistoricalShares,
+  onSaveAsTeamDefault,
+  onLoadTeamDefault,
+  onOpenReplicateModal,
+  hasSavedTeamDefault = false,
   monthlyTarget = 0,
+  monthNumber = 9,
+  year = 2026,
 }) => {
-  const { setCurrentView } = useApp();
+  const { setCurrentView, availabilities } = useApp();
   const totalSharePercentage = summary?.totalSharePercentage ?? 100;
   const isValid = summary?.isValid ?? true;
   const validationMessage = summary?.validationMessage;
@@ -141,6 +157,42 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
             <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
             <span>Divisão Igual</span>
           </button>
+
+          {onSaveAsTeamDefault && (
+            <button
+              type="button"
+              onClick={onSaveAsTeamDefault}
+              title="Salva as porcentagens atuais como o padrão oficial pré-configurado da equipe"
+              className="flex-1 sm:flex-none px-2.5 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg shadow-2xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Star className="w-3.5 h-3.5 text-amber-600" />
+              <span>Salvar Padrão</span>
+            </button>
+          )}
+
+          {hasSavedTeamDefault && onLoadTeamDefault && (
+            <button
+              type="button"
+              onClick={onLoadTeamDefault}
+              title="Carrega as porcentagens do padrão pré-configurado da equipe"
+              className="flex-1 sm:flex-none px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg shadow-2xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-500" />
+              <span>Usar Padrão</span>
+            </button>
+          )}
+
+          {onOpenReplicateModal && (
+            <button
+              type="button"
+              onClick={onOpenReplicateModal}
+              title="Replicar esta distribuição de porcentagens para outros meses de 2026"
+              className="flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-2xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>Replicar p/ Meses</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -191,11 +243,32 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
                   const sellerTarget = Math.round(monthlyTarget * (officialShare / 100));
                   const requiredSales = Math.ceil(sellerTarget / Math.max(1, seller.averageTicket || 300));
 
+                  const mStr = String(monthNumber || 9).padStart(2, '0');
+                  const yr = year || 2026;
+                  const monthStart = `${yr}-${mStr}-01`;
+                  const monthEnd = `${yr}-${mStr}-31`;
+
+                  const sellerAbsences = (availabilities || []).filter((a) => {
+                    if (a.sellerId !== seller.sellerId) return false;
+                    return a.startDate <= monthEnd && a.endDate >= monthStart;
+                  });
+
                   return (
                     <tr key={seller.sellerId} className="hover:bg-slate-50/60 transition-colors">
                       {/* Nome e Senioridade */}
                       <td className="py-3 px-3">
-                        <div className="font-semibold text-slate-900 text-sm">{seller.sellerName}</div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-semibold text-slate-900 text-sm">{seller.sellerName}</span>
+                          {sellerAbsences.length > 0 && (
+                            <span
+                              title={`Férias/afastamento cadastrado neste mês (${sellerAbsences[0].startDate} a ${sellerAbsences[0].endDate})`}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold shadow-2xs"
+                            >
+                              <Palmtree className="w-3 h-3 text-amber-700" />
+                              <span>Férias agendadas</span>
+                            </span>
+                          )}
+                        </div>
                         <div className="mt-0.5">{renderSeniorityBadge(seller.seniorityLevel)}</div>
                       </td>
 
@@ -334,6 +407,16 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
               const sellerTarget = Math.round(monthlyTarget * (officialShare / 100));
               const requiredSales = Math.ceil(sellerTarget / Math.max(1, seller.averageTicket || 300));
 
+              const mStr = String(monthNumber || 9).padStart(2, '0');
+              const yr = year || 2026;
+              const monthStart = `${yr}-${mStr}-01`;
+              const monthEnd = `${yr}-${mStr}-31`;
+
+              const sellerAbsences = (availabilities || []).filter((a) => {
+                if (a.sellerId !== seller.sellerId) return false;
+                return a.startDate <= monthEnd && a.endDate >= monthStart;
+              });
+
               return (
                 <div
                   key={seller.sellerId}
@@ -341,7 +424,18 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <div className="font-bold text-slate-900 text-sm">{seller.sellerName}</div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-bold text-slate-900 text-sm">{seller.sellerName}</span>
+                        {sellerAbsences.length > 0 && (
+                          <span
+                            title={`Férias/afastamento cadastrado neste mês (${sellerAbsences[0].startDate} a ${sellerAbsences[0].endDate})`}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold shadow-2xs"
+                          >
+                            <Palmtree className="w-3 h-3 text-amber-700" />
+                            <span>Férias agendadas</span>
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                         {renderSeniorityBadge(seller.seniorityLevel)}
                         {renderOriginBadge(seller.shareOriginType)}
