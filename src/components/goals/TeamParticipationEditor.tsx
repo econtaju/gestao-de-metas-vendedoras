@@ -29,6 +29,7 @@ interface TeamParticipationEditorProps {
   onSaveAsTeamDefault?: () => void;
   onLoadTeamDefault?: () => void;
   onOpenReplicateModal?: () => void;
+  onOpenVacationRedistributionModal?: (sellerId?: string) => void;
   hasSavedTeamDefault?: boolean;
   monthlyTarget: number;
   monthNumber?: number;
@@ -44,6 +45,7 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
   onSaveAsTeamDefault,
   onLoadTeamDefault,
   onOpenReplicateModal,
+  onOpenVacationRedistributionModal,
   hasSavedTeamDefault = false,
   monthlyTarget = 0,
   monthNumber = 9,
@@ -55,6 +57,17 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
   const validationMessage = summary?.validationMessage;
   const safeSellers = Array.isArray(summary?.sellers) ? summary.sellers : [];
   const diff = Math.round((100 - totalSharePercentage) * 10) / 10;
+
+  const mStr = String(monthNumber || 9).padStart(2, '0');
+  const yr = year || 2026;
+  const monthStart = `${yr}-${mStr}-01`;
+  const monthEnd = `${yr}-${mStr}-31`;
+
+  const vacationSellersCount = safeSellers.filter((s) => {
+    return (availabilities || []).some(
+      (a) => a.sellerId === s.sellerId && a.startDate <= monthEnd && a.endDate >= monthStart
+    );
+  }).length;
 
   // Seniority badge renderer
   const renderSeniorityBadge = (level?: string) => {
@@ -182,6 +195,27 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
             </button>
           )}
 
+          {onOpenVacationRedistributionModal && (
+            <button
+              type="button"
+              onClick={() => onOpenVacationRedistributionModal()}
+              title="Repartir / cobrir a cota de vendedoras em férias para outras da equipe"
+              className={`flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold rounded-lg shadow-2xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
+                vacationSellersCount > 0
+                  ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300'
+              }`}
+            >
+              <Palmtree className="w-3.5 h-3.5" />
+              <span>Cobrir Férias</span>
+              {vacationSellersCount > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.2 bg-white text-amber-900 rounded-full text-[10px] font-black">
+                  {vacationSellersCount}
+                </span>
+              )}
+            </button>
+          )}
+
           {onOpenReplicateModal && (
             <button
               type="button"
@@ -260,13 +294,25 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-semibold text-slate-900 text-sm">{seller.sellerName}</span>
                           {sellerAbsences.length > 0 && (
-                            <span
-                              title={`Férias/afastamento cadastrado neste mês (${sellerAbsences[0].startDate} a ${sellerAbsences[0].endDate})`}
-                              className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold shadow-2xs"
-                            >
-                              <Palmtree className="w-3 h-3 text-amber-700" />
-                              <span>Férias agendadas</span>
-                            </span>
+                            <div className="inline-flex items-center gap-1 mt-0.5">
+                              <span
+                                title={`Férias/afastamento cadastrado neste mês (${sellerAbsences[0].startDate} a ${sellerAbsences[0].endDate})`}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold shadow-2xs"
+                              >
+                                <Palmtree className="w-3 h-3 text-amber-700" />
+                                <span>Férias agendadas</span>
+                              </span>
+                              {onOpenVacationRedistributionModal && (
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenVacationRedistributionModal(seller.sellerId)}
+                                  title="Repartir a cota restante desta vendedora"
+                                  className="px-1.5 py-0.2 bg-amber-200/90 hover:bg-amber-300 text-amber-950 rounded text-[9px] font-bold transition cursor-pointer"
+                                >
+                                  Repartir cota ➔
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
                         <div className="mt-0.5">{renderSeniorityBadge(seller.seniorityLevel)}</div>
@@ -427,13 +473,25 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-bold text-slate-900 text-sm">{seller.sellerName}</span>
                         {sellerAbsences.length > 0 && (
-                          <span
-                            title={`Férias/afastamento cadastrado neste mês (${sellerAbsences[0].startDate} a ${sellerAbsences[0].endDate})`}
-                            className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold shadow-2xs"
-                          >
-                            <Palmtree className="w-3 h-3 text-amber-700" />
-                            <span>Férias agendadas</span>
-                          </span>
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            <span
+                              title={`Férias/afastamento cadastrado neste mês (${sellerAbsences[0].startDate} a ${sellerAbsences[0].endDate})`}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold shadow-2xs"
+                            >
+                              <Palmtree className="w-3 h-3 text-amber-700" />
+                              <span>Férias agendadas</span>
+                            </span>
+                            {onOpenVacationRedistributionModal && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenVacationRedistributionModal(seller.sellerId)}
+                                title="Repartir a cota restante desta vendedora"
+                                className="px-1.5 py-0.5 bg-amber-200/90 hover:bg-amber-300 text-amber-950 rounded text-[9px] font-bold transition cursor-pointer"
+                              >
+                                Repartir cota ➔
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 mt-1 flex-wrap">

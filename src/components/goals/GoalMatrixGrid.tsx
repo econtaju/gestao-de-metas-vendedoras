@@ -26,6 +26,7 @@ interface GoalMatrixGridProps {
   monthName: string;
   year: number;
   monthNumber?: number;
+  onOpenVacationRedistributionModal?: (sellerId?: string) => void;
 }
 
 export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
@@ -36,6 +37,7 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
   monthName = 'Mês',
   year = 2026,
   monthNumber = 9,
+  onOpenVacationRedistributionModal,
 }) => {
   const { activeCompany, companySellers, availabilities, workingDaysSettings } = useApp();
   const safeSellers = Array.isArray(teamSummary?.sellers) ? teamSummary.sellers : [];
@@ -47,6 +49,35 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
     officialSharePercentage: number;
     seniorityLevel?: string;
   } | null>(null);
+
+  // Calcula o total de cotas descobertas por férias na unidade
+  const totalUncoveredVacationAmount = React.useMemo(() => {
+    let totalUncovered = 0;
+    safeSellers.forEach((seller) => {
+      const baseMonthly = Math.round(monthlyTarget * (seller.officialSharePercentage / 100));
+      let effectiveSellerMonthly = 0;
+      safeWeeks.forEach((week) => {
+        const mStr = String(monthNumber || 9).padStart(2, '0');
+        const startDateStr =
+          week.startDate || `${year}-${mStr}-${String(week.startDay || 1).padStart(2, '0')}`;
+        const endDateStr =
+          week.endDate || `${year}-${mStr}-${String(week.endDay || 7).padStart(2, '0')}`;
+        const avail = getSellerIntervalAvailability(
+          seller.sellerId,
+          startDateStr,
+          endDateStr,
+          availabilities || [],
+          workingDaysSettings
+        );
+        const baseWeek = Math.round(
+          monthlyTarget * (week.weightPercentage / 100) * (seller.officialSharePercentage / 100)
+        );
+        effectiveSellerMonthly += Math.round(baseWeek * avail.factor);
+      });
+      totalUncovered += Math.max(0, baseMonthly - effectiveSellerMonthly);
+    });
+    return totalUncovered;
+  }, [safeSellers, safeWeeks, monthlyTarget, monthNumber, year, availabilities, workingDaysSettings]);
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -72,6 +103,36 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
           </span>
         </div>
       </div>
+
+      {/* Banner Informativo de Cota de Férias a Cobrir */}
+      {totalUncoveredVacationAmount > 0 && (
+        <div className="mx-5 mt-4 p-3.5 bg-amber-50 border border-amber-300/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs animate-in fade-in duration-150">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-amber-100 text-amber-900 rounded-xl shrink-0">
+              <Palmtree className="w-5 h-5 text-amber-700" />
+            </div>
+            <div>
+              <span className="font-bold text-amber-950 block text-xs sm:text-sm">
+                Cota de Férias a Cobrir: {formatCurrency(totalUncoveredVacationAmount)}
+              </span>
+              <span className="text-amber-900/80 text-[11px] block mt-0.5">
+                Vendedoras da unidade estão em período de férias. Você pode repartir essa diferença entre as vendedoras presentes para manter a meta da loja em 100%.
+              </span>
+            </div>
+          </div>
+
+          {onOpenVacationRedistributionModal && (
+            <button
+              type="button"
+              onClick={() => onOpenVacationRedistributionModal()}
+              className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl transition shadow-xs flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+            >
+              <Palmtree className="w-4 h-4" />
+              <span>Redistribuir Cota de Férias ➔</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Grade da Matriz */}
       <div className="p-5">
@@ -168,9 +229,21 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
                           <span className="truncate">{seller.sellerName}</span>
                         </div>
                         {hasAbsences && (
-                          <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold">
-                            <Palmtree className="w-3 h-3 text-amber-700" />
-                            <span>Férias ({totalWorkedDaysInMonth}/{totalExpectedDaysInMonth} dias trab.)</span>
+                          <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold">
+                              <Palmtree className="w-3 h-3 text-amber-700" />
+                              <span>Férias ({totalWorkedDaysInMonth}/{totalExpectedDaysInMonth} dias trab.)</span>
+                            </span>
+                            {onOpenVacationRedistributionModal && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenVacationRedistributionModal(seller.sellerId)}
+                                title="Repartir a cota desta vendedora para outras"
+                                className="px-1.5 py-0.2 bg-amber-200/90 hover:bg-amber-300 text-amber-950 rounded text-[9px] font-bold transition cursor-pointer"
+                              >
+                                Repartir cota ➔
+                              </button>
+                            )}
                           </div>
                         )}
                       </td>

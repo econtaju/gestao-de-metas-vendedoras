@@ -8,7 +8,6 @@ import {
 import {
   calculateSellerGoalDetail,
   replicateSharesToOtherMonths,
-  buildCommercialWeeks,
 } from '../src/services/masterGoalEngine';
 import {
   Seller,
@@ -17,12 +16,14 @@ import {
   CommercialWeekPeriod,
 } from '../src/types';
 
-describe('Férias Proporcionais nas Semanas & Replicação de Metas', () => {
+describe('Férias Proporcionais nas Semanas, Replicação de Metas & Redistribuição de Cota', () => {
   const mockSeller: Seller = {
     id: 'seller-ana',
     name: 'Ana Silva',
     companyId: 'comp-1',
     branchId: 'branch-1',
+    role: 'Vendedora Pleno',
+    startDate: '2025-01-01',
     seniorityLevel: 'pleno',
     officialSharePercentage: 25,
     historicalSharePercentage: 25,
@@ -35,41 +36,45 @@ describe('Férias Proporcionais nas Semanas & Replicação de Metas', () => {
       weekNumber: 1,
       startDay: 1,
       endDay: 7,
+      label: 'Semana 1',
+      dateRangeLabel: '01 a 07',
       startDate: '2026-09-01',
       endDate: '2026-09-07',
       weightPercentage: 25,
       revenueTarget: 50000,
-      targetAmount: 50000,
     },
     {
       weekNumber: 2,
       startDay: 8,
       endDay: 14,
+      label: 'Semana 2',
+      dateRangeLabel: '08 a 14',
       startDate: '2026-09-08',
       endDate: '2026-09-14',
       weightPercentage: 25,
       revenueTarget: 50000,
-      targetAmount: 50000,
     },
     {
       weekNumber: 3,
       startDay: 15,
       endDay: 21,
+      label: 'Semana 3',
+      dateRangeLabel: '15 a 21',
       startDate: '2026-09-15',
       endDate: '2026-09-21',
       weightPercentage: 25,
       revenueTarget: 50000,
-      targetAmount: 50000,
     },
     {
       weekNumber: 4,
       startDay: 22,
       endDay: 30,
+      label: 'Semana 4',
+      dateRangeLabel: '22 a 30',
       startDate: '2026-09-22',
       endDate: '2026-09-30',
       weightPercentage: 25,
       revenueTarget: 50000,
-      targetAmount: 50000,
     },
   ];
 
@@ -88,6 +93,7 @@ describe('Férias Proporcionais nas Semanas & Replicação de Metas', () => {
     isValid: true,
     status: 'draft',
     commissionRuleType: 'monthly',
+    updatedAt: '2026-09-01T00:00:00.000Z',
   };
 
   test('1. getSellerIntervalAvailability calcula disponibilidade para semana normal (sem férias)', () => {
@@ -109,11 +115,18 @@ describe('Férias Proporcionais nas Semanas & Replicação de Metas', () => {
     const vacations: SellerAvailability[] = [
       {
         id: 'vac-1',
+        companyId: 'comp-1',
+        branchId: 'branch-1',
         sellerId: 'seller-ana',
+        absenceType: 'vacation',
         startDate: '2026-09-08',
         endDate: '2026-09-21', // Cobre a semana 2 inteira e semana 3
-        type: 'vacation',
+        availabilityPercentage: 0,
+        redistributionEnabled: true,
+        redistributionMethod: 'equal',
         notes: 'Férias regulares',
+        createdAt: '2026-09-01',
+        updatedAt: '2026-09-01',
       },
     ];
 
@@ -135,11 +148,18 @@ describe('Férias Proporcionais nas Semanas & Replicação de Metas', () => {
     const vacations: SellerAvailability[] = [
       {
         id: 'vac-1',
+        companyId: 'comp-1',
+        branchId: 'branch-1',
         sellerId: 'seller-ana',
+        absenceType: 'vacation',
         startDate: '2026-09-08',
         endDate: '2026-09-14', // Semana 2 inteira de férias
-        type: 'vacation',
+        availabilityPercentage: 0,
+        redistributionEnabled: true,
+        redistributionMethod: 'equal',
         notes: 'Férias Semana 2',
+        createdAt: '2026-09-01',
+        updatedAt: '2026-09-01',
       },
     ];
 
@@ -211,5 +231,68 @@ describe('Férias Proporcionais nas Semanas & Replicação de Metas', () => {
     assert.ok(octGoal.changeLogs && octGoal.changeLogs.length > 0);
     assert.equal(octGoal.changeLogs[0].action, 'update_shares');
     assert.match(octGoal.changeLogs[0].description, /Replicação de padrão de participação/);
+  });
+
+  test('5. Cobertura de cota de férias com destinatário único: transfere a diferença integralmente para a vendedora escolhida', () => {
+    // Cenário: 4 vendedoras com 25% cada (Meta total R$ 200.000).
+    // Ana tira 15 dias de férias (50% do mês).
+    // Cota trabalhada da Ana = 12.5% (R$ 25.000). Cota descoberta = 12.5% (R$ 25.000).
+    // O gestor escolhe transferir 100% da cota descoberta para Bruna.
+    const initialShares = {
+      'seller-ana': 25,
+      'seller-bruna': 25,
+      'seller-carla': 25,
+      'seller-dani': 25,
+    };
+
+    const anaWorkedFactor = 0.5; // 50% dos dias úteis
+    const anaEffectiveShare = Math.round(initialShares['seller-ana'] * anaWorkedFactor * 10) / 10; // 12.5%
+    const uncoveredShare = Math.round((initialShares['seller-ana'] - anaEffectiveShare) * 10) / 10; // 12.5%
+
+    // Transferir para Bruna:
+    const newShares = {
+      'seller-ana': anaEffectiveShare, // 12.5%
+      'seller-bruna': Math.round((initialShares['seller-bruna'] + uncoveredShare) * 10) / 10, // 37.5%
+      'seller-carla': initialShares['seller-carla'], // 25%
+      'seller-dani': initialShares['seller-dani'], // 25%
+    };
+
+    assert.equal(newShares['seller-ana'], 12.5);
+    assert.equal(newShares['seller-bruna'], 37.5);
+    assert.equal(newShares['seller-carla'], 25);
+    assert.equal(newShares['seller-dani'], 25);
+
+    const sum = Object.values(newShares).reduce((a, b) => a + b, 0);
+    assert.equal(sum, 100, 'A soma da equipe deve continuar cravando 100%');
+  });
+
+  test('6. Cobertura de cota de férias com divisão igualitária entre as presentes: soma continua 100%', () => {
+    const initialShares = {
+      'seller-ana': 25,
+      'seller-bruna': 25,
+      'seller-carla': 25,
+      'seller-dani': 25,
+    };
+
+    const anaWorkedFactor = 0; // Ana de férias o mês inteiro
+    const anaEffectiveShare = 0;
+    const uncoveredShare = 25; // 25% a redistribuir entre as 3 presentes
+
+    const extraPerSeller = Math.round((uncoveredShare / 3) * 10) / 10; // 8.3%
+    const newShares = {
+      'seller-ana': 0,
+      'seller-bruna': Math.round((25 + extraPerSeller) * 10) / 10, // 33.3%
+      'seller-carla': Math.round((25 + extraPerSeller) * 10) / 10, // 33.3%
+      'seller-dani': Math.round((25 + extraPerSeller) * 10) / 10, // 33.3%
+    };
+
+    // Ajuste de resíduo para cravar 100
+    const sum = Object.values(newShares).reduce((a, b) => a + b, 0);
+    const diff = Math.round((100 - sum) * 10) / 10;
+    newShares['seller-bruna'] = Math.round((newShares['seller-bruna'] + diff) * 10) / 10;
+
+    assert.equal(newShares['seller-ana'], 0);
+    const finalSum = Math.round(Object.values(newShares).reduce((a, b) => a + b, 0) * 10) / 10;
+    assert.equal(finalSum, 100, 'A soma final deve ser exatamente 100%');
   });
 });

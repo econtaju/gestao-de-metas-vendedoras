@@ -45,6 +45,7 @@ import { GoalSimulatorModal } from './GoalSimulatorModal';
 import { WeeklySellerLevelsMatrix } from './WeeklySellerLevelsMatrix';
 import { GoalConflictModal } from './GoalConflictModal';
 import { ReplicateMonthlySharesModal } from './ReplicateMonthlySharesModal';
+import { VacationShareRedistributionModal } from './VacationShareRedistributionModal';
 import {
   MonthlyMasterGoal,
   CommercialWeekPeriod,
@@ -99,6 +100,8 @@ export const GoalGenerator: React.FC = () => {
     autoRedistributeTeamParticipation,
     updateCompany,
     currentUser,
+    availabilities,
+    workingDaysSettings,
   } = useApp();
 
   // Mês e Ano de trabalho
@@ -760,6 +763,28 @@ export const GoalGenerator: React.FC = () => {
 
     setSaveSuccessMessage(`Padrão replicado com sucesso para ${targetMonths.length} ${targetMonths.length === 1 ? 'mês' : 'meses'}!`);
     setTimeout(() => setSaveSuccessMessage(null), 4000);
+  };
+
+  // Modal de redistribuição de cotas de férias
+  const [isVacationRedistributionOpen, setIsVacationRedistributionOpen] = useState<boolean>(false);
+  const [vacationModalSelectedSellerId, setVacationModalSelectedSellerId] = useState<string | undefined>(undefined);
+
+  const handleOpenVacationRedistributionModal = (sellerId?: string) => {
+    setVacationModalSelectedSellerId(sellerId);
+    setIsVacationRedistributionOpen(true);
+  };
+
+  const handleApplyVacationRedistribution = (
+    newShares: Record<string, number>,
+    logDescription: string
+  ) => {
+    Object.entries(newShares).forEach(([sellerId, share]) => {
+      updateSellerShare(sellerId, share, 'adjusted');
+    });
+
+    addAuditLog('update_shares', logDescription);
+    setSaveSuccessMessage('Redistribuição de cota de férias aplicada com sucesso!');
+    setTimeout(() => setSaveSuccessMessage(null), 3500);
   };
 
   // Validação geral
@@ -1459,6 +1484,7 @@ export const GoalGenerator: React.FC = () => {
         onSaveAsTeamDefault={handleSaveAsTeamDefault}
         onLoadTeamDefault={handleLoadTeamDefault}
         onOpenReplicateModal={() => setIsReplicateModalOpen(true)}
+        onOpenVacationRedistributionModal={handleOpenVacationRedistributionModal}
         hasSavedTeamDefault={Boolean(activeCompany.defaultSellerShares && Object.keys(activeCompany.defaultSellerShares).length > 0)}
         monthlyTarget={monthlyTarget}
         monthNumber={selectedMonthNumber}
@@ -1474,6 +1500,7 @@ export const GoalGenerator: React.FC = () => {
         monthName={ALL_MONTHS.find((m) => m.number === selectedMonthNumber)?.name || 'Mês'}
         year={selectedYear}
         monthNumber={selectedMonthNumber}
+        onOpenVacationRedistributionModal={handleOpenVacationRedistributionModal}
       />
 
       {/* 6. NÍVEIS DA SEMANA POR VENDEDORA (NÍVEIS SEMANAIS DA EQUIPE) */}
@@ -1791,6 +1818,31 @@ export const GoalGenerator: React.FC = () => {
         branchId={selectedBranchId}
         branchName={activeBranch?.name || 'Unidade Principal'}
         onConfirmReplication={handleConfirmReplication}
+      />
+
+      {/* Modal de Redistribuição e Cobertura de Férias */}
+      <VacationShareRedistributionModal
+        isOpen={isVacationRedistributionOpen}
+        onClose={() => {
+          setIsVacationRedistributionOpen(false);
+          setVacationModalSelectedSellerId(undefined);
+        }}
+        monthlyTarget={monthlyTarget}
+        monthNumber={selectedMonthNumber}
+        monthName={ALL_MONTHS.find((m) => m.number === selectedMonthNumber)?.name || 'Mês'}
+        year={selectedYear}
+        branchName={activeBranch?.name || 'Unidade Principal'}
+        sellers={(teamSummary.sellers || []).map((s) => ({
+          sellerId: s.sellerId,
+          sellerName: s.sellerName,
+          officialSharePercentage: s.officialSharePercentage,
+          seniorityLevel: s.seniorityLevel,
+        }))}
+        availabilities={availabilities || []}
+        workingDaysSettings={workingDaysSettings}
+        weeks={weeks}
+        initialSellerId={vacationModalSelectedSellerId}
+        onApplyNewShares={handleApplyVacationRedistribution}
       />
     </div>
   );
