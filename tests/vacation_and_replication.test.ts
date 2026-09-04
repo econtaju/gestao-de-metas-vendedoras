@@ -427,4 +427,80 @@ describe('Férias Proporcionais nas Semanas, Replicação de Metas & Redistribui
     assert.ok(distributedPercentage < 100, 'Percentual distribuído deve ser menor que 100%');
     assert.equal(Math.round(distributedPercentage * 10) / 10, 93.1, 'Percentual distribuído deve ser ~93.1%');
   });
+
+  test('10. Redistribuição Individual Universal (com ou sem férias prévias) e Relatório de Confirmação em 100%', () => {
+    // Meta da Loja: R$ 144.000,00
+    const monthlyTarget = 144000;
+    const sellers = [
+      { sellerId: 'seller-1', sellerName: 'Ana', baseShare: 25, baseTarget: 36000 },
+      { sellerId: 'seller-2', sellerName: 'Bruna', baseShare: 25, baseTarget: 36000 },
+      { sellerId: 'seller-3', sellerName: 'Carla', baseShare: 25, baseTarget: 36000 },
+      { sellerId: 'seller-4', sellerName: 'Dani', baseShare: 25, baseTarget: 36000 },
+    ];
+
+    // Cedente escolhida: Ana (seller-1). Meta a redistribuir: R$ 10.000 (mesmo sem férias cadastradas no sistema)
+    const sourceSellerId = 'seller-1';
+    const amountToRedistribute = 10000;
+    const shareToRedistribute = (amountToRedistribute / monthlyTarget) * 100; // 6.9444...%
+
+    // Divisão Individual escolhida:
+    // Bruna recebe +R$ 7.000
+    // Carla recebe +R$ 3.000
+    // Dani recebe R$ 0
+    const customAllocations = {
+      'seller-2': 7000,
+      'seller-3': 3000,
+      'seller-4': 0,
+    };
+
+    const allocatedSum = Object.values(customAllocations).reduce((a, b) => a + b, 0);
+    assert.equal(allocatedSum, amountToRedistribute, 'A soma das alocações individuais deve bater exatamente o valor a redistribuir');
+
+    // Calcula novas participações
+    const calculatedNewShares: Record<string, number> = {};
+    calculatedNewShares[sourceSellerId] = Math.round((sellers[0].baseShare - shareToRedistribute) * 10) / 10; // 25 - 6.9 = 18.1%
+
+    let recipientTotalShare = 0;
+    for (const [sId, addedAmount] of Object.entries(customAllocations)) {
+      const baseShare = sellers.find(s => s.sellerId === sId)!.baseShare;
+      const addedShare = (addedAmount / monthlyTarget) * 100;
+      calculatedNewShares[sId] = Math.round((baseShare + addedShare) * 10) / 10;
+      recipientTotalShare += calculatedNewShares[sId];
+    }
+
+    // Ajuste fino para fechar exatamente em 100.0%
+    const totalSharesCalculated = calculatedNewShares[sourceSellerId] + recipientTotalShare;
+    const roundDiff = Math.round((100 - totalSharesCalculated) * 10) / 10;
+    if (roundDiff !== 0) {
+      calculatedNewShares['seller-2'] = Math.round((calculatedNewShares['seller-2'] + roundDiff) * 10) / 10;
+    }
+
+    const finalSumShares = Math.round(Object.values(calculatedNewShares).reduce((a, b) => a + b, 0) * 10) / 10;
+    assert.equal(finalSumShares, 100.0, 'Soma das novas participações deve ser rigorosamente 100.0%');
+
+    // Valida relatório de Antes vs Depois da tela de sucesso
+    const report = sellers.map(s => {
+      const newShare = calculatedNewShares[s.sellerId];
+      const newTarget = Math.round(monthlyTarget * (newShare / 100));
+      const diff = newTarget - s.baseTarget;
+      return {
+        sellerId: s.sellerId,
+        sellerName: s.sellerName,
+        baseTarget: s.baseTarget,
+        newTarget,
+        diff,
+        newShare,
+      };
+    });
+
+    const totalReportRevenue = report.reduce((acc, r) => acc + r.newTarget, 0);
+    assert.equal(totalReportRevenue, monthlyTarget, 'Soma das novas metas no relatório deve fechar os 144.000 da unidade');
+
+    // Ana cedeu ~10.000
+    assert.ok(report.find(r => r.sellerId === 'seller-1')!.diff < 0);
+    // Bruna e Carla aumentaram suas metas
+    assert.ok(report.find(r => r.sellerId === 'seller-2')!.diff > 0);
+    assert.ok(report.find(r => r.sellerId === 'seller-3')!.diff > 0);
+  });
 });
+

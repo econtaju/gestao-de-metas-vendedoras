@@ -878,8 +878,11 @@ export const GoalGenerator: React.FC = () => {
       updateSellerShare(sellerId, share, 'adjusted');
     });
 
+    // Salva imediatamente e de forma síncrona no MasterGoal e no armazenamento
+    buildAndSaveMasterGoal(newShares);
+
     addAuditLog('update_shares', logDescription);
-    setSaveSuccessMessage('Redistribuição de cota de férias aplicada com sucesso!');
+    setSaveSuccessMessage('Redistribuição de metas aplicada e salva com sucesso!');
     setTimeout(() => setSaveSuccessMessage(null), 3500);
   };
 

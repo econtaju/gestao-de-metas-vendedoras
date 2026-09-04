@@ -228,7 +228,7 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
             <button
               type="button"
               onClick={() => onOpenVacationRedistributionModal()}
-              title="Repartir / cobrir a cota de vendedoras em férias para outras da equipe"
+              title="Repartir / cobrir a cota de vendedoras em férias ou redistribuir metas individualmente"
               className={`flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold rounded-lg shadow-2xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
                 vacationSellersCount > 0
                   ? 'bg-amber-600 hover:bg-amber-700 text-white'
@@ -236,7 +236,7 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
               }`}
             >
               <Palmtree className="w-3.5 h-3.5" />
-              <span>Cobrir Férias</span>
+              <span>🔀 Redistribuir Metas</span>
               {vacationSellersCount > 0 && (
                 <span className="ml-0.5 px-1.5 py-0.2 bg-white text-amber-900 rounded-full text-[10px] font-black">
                   {vacationSellersCount}
@@ -424,14 +424,26 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
 
                       {/* Botão de Auto-Redistribuição */}
                       <td className="py-3 px-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => onRedistributeProportionally(seller.sellerId, seller.officialSharePercentage)}
-                          title="Fixa a porcentagem deste vendedor e recalcula os outros para fechar em 100%"
-                          className="px-2 py-1 text-[11px] font-medium text-purple-700 hover:text-purple-900 hover:bg-purple-50 rounded border border-purple-200 transition-colors"
-                        >
-                          Compensar
-                        </button>
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => onRedistributeProportionally(seller.sellerId, seller.officialSharePercentage)}
+                            title="Fixa a porcentagem deste vendedor e recalcula os outros para fechar em 100%"
+                            className="px-2 py-1 text-[11px] font-medium text-purple-700 hover:text-purple-900 hover:bg-purple-50 rounded border border-purple-200 transition-colors cursor-pointer"
+                          >
+                            Compensar
+                          </button>
+                          {onOpenVacationRedistributionModal && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenVacationRedistributionModal(seller.sellerId)}
+                              title={`Redistribuir cota / férias individualmente a partir de ${seller.sellerName}`}
+                              className="px-2 py-1 text-[11px] font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 hover:text-amber-950 rounded border border-amber-300 transition-colors cursor-pointer flex items-center gap-0.5"
+                            >
+                              <span>🔀 Distribuir</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
 
                       {/* Botão de Salvar Individual */}
@@ -572,7 +584,7 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
                         {renderOriginBadge(seller.shareOriginType)}
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
                       <button
                         type="button"
                         onClick={() => handleSaveSingle(seller.sellerId)}
@@ -599,10 +611,20 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
                         type="button"
                         onClick={() => onRedistributeProportionally(seller.sellerId, seller.officialSharePercentage)}
                         title="Compensar participação"
-                        className="px-2 py-1 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 transition cursor-pointer"
+                        className="px-2 py-1 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 transition cursor-pointer"
                       >
                         Compensar
                       </button>
+                      {onOpenVacationRedistributionModal && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenVacationRedistributionModal(seller.sellerId)}
+                          title={`Redistribuir cota / férias individualmente a partir de ${seller.sellerName}`}
+                          className="px-2 py-1 text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-lg border border-amber-300 transition cursor-pointer"
+                        >
+                          🔀 Distribuir
+                        </button>
+                      )}
                     </div>
                   </div>
 
