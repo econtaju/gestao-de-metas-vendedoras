@@ -23,6 +23,7 @@ interface WeeklySellerLevelsMatrixProps {
   branchName: string;
   monthNumber?: number;
   year?: number;
+  sellerShares?: Record<string, number>;
 }
 
 export const WeeklySellerLevelsMatrix: React.FC<WeeklySellerLevelsMatrixProps> = ({
@@ -33,6 +34,7 @@ export const WeeklySellerLevelsMatrix: React.FC<WeeklySellerLevelsMatrixProps> =
   branchName,
   monthNumber = 9,
   year = 2026,
+  sellerShares,
 }) => {
   const { activeCompany, updateCompany, availabilities, workingDaysSettings } = useApp();
   const [selectedWeekNumber, setSelectedWeekNumber] = useState<number>(1);
@@ -45,11 +47,14 @@ export const WeeklySellerLevelsMatrix: React.FC<WeeklySellerLevelsMatrixProps> =
   const weekWeightPct = selectedWeek ? selectedWeek.weightPercentage : 25;
   const weekUnitTarget = Math.round(monthlyTarget * (weekWeightPct / 100));
 
-  // Calcula a razão de cada nível em relação ao Nível 1
-  const baseCompanyLevelTarget = activeLevels[0]?.revenueTarget || 30000;
-  const levelRatios = activeLevels.map((lvl) => {
-    return baseCompanyLevelTarget > 0 ? lvl.revenueTarget / baseCompanyLevelTarget : 1;
-  });
+  const mStr = String(monthNumber || 9).padStart(2, '0');
+  const yr = year || 2026;
+  const startDateStr =
+    selectedWeek?.startDate ||
+    `${yr}-${mStr}-${String(selectedWeek?.startDay || 1).padStart(2, '0')}`;
+  const endDateStr =
+    selectedWeek?.endDate ||
+    `${yr}-${mStr}-${String(selectedWeek?.endDay || 7).padStart(2, '0')}`;
 
   const handleSaveLevelNames = () => {
     const updatedLevels = activeCompany.levels.map((lvl, index) => {
@@ -181,14 +186,21 @@ export const WeeklySellerLevelsMatrix: React.FC<WeeklySellerLevelsMatrixProps> =
               <th className="p-3">Vendedora / Consultora</th>
               <th className="p-3 text-center">Part. %</th>
               {activeLevels.map((lvl, idx) => {
-                const ratio = levelRatios[idx] || 1;
-                const ratioPct = Math.round(ratio * 100);
+                const lvlWeekTarget = Math.round(lvl.revenueTarget * (weekWeightPct / 100));
                 return (
                   <th key={lvl.level} className="p-3 text-right">
                     <div className="flex flex-col items-end">
-                      <span className="text-white font-bold">{lvl.name || `Nível ${idx + 1}`}</span>
-                      <span className="text-[10px] text-amber-300 font-medium">
-                        {lvl.commissionPercentage}% comissão {ratioPct !== 100 ? `(${ratioPct}%)` : ''}
+                      <div className="flex items-center gap-1">
+                        <span className="text-white font-bold">{lvl.name || `Nível ${idx + 1}`}</span>
+                        <span className="text-[10px] text-amber-300 font-semibold">
+                          ({lvl.commissionPercentage}%)
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-300 font-normal mt-0.5">
+                        Mês: {formatCurrency(lvl.revenueTarget).replace(',00', '')}
+                      </span>
+                      <span className="text-[10px] font-mono text-emerald-300 font-bold bg-slate-900/80 px-1.5 py-0.2 rounded mt-0.5">
+                        Semana: {formatCurrency(lvlWeekTarget).replace(',00', '')}
                       </span>
                     </div>
                   </th>
@@ -205,17 +217,9 @@ export const WeeklySellerLevelsMatrix: React.FC<WeeklySellerLevelsMatrixProps> =
               </tr>
             ) : (
               sellers.map((seller) => {
-                const sharePct = seller.officialSharePercentage ?? (100 / sellers.length);
-                const sellerBaseWeekTarget = Math.round(weekUnitTarget * (sharePct / 100));
-
-                const mStr = String(monthNumber || 9).padStart(2, '0');
-                const yr = year || 2026;
-                const startDateStr =
-                  selectedWeek?.startDate ||
-                  `${yr}-${mStr}-${String(selectedWeek?.startDay || 1).padStart(2, '0')}`;
-                const endDateStr =
-                  selectedWeek?.endDate ||
-                  `${yr}-${mStr}-${String(selectedWeek?.endDay || 7).padStart(2, '0')}`;
+                const sharePct = (sellerShares && typeof sellerShares[seller.id] === 'number')
+                  ? sellerShares[seller.id]
+                  : (seller.officialSharePercentage ?? (100 / Math.max(1, sellers.length)));
 
                 const avail = getSellerIntervalAvailability(
                   seller.id,
@@ -227,7 +231,6 @@ export const WeeklySellerLevelsMatrix: React.FC<WeeklySellerLevelsMatrixProps> =
 
                 const isFullAbsence = avail.factor === 0 && avail.daysExpected > 0;
                 const isPartialAbsence = avail.factor > 0 && avail.factor < 1;
-                const sellerAdjustedWeekTarget = Math.round(sellerBaseWeekTarget * avail.factor);
 
                 return (
                   <tr key={seller.id} className={`hover:bg-slate-50/80 transition-colors ${isFullAbsence ? 'bg-amber-50/30' : ''}`}>
@@ -257,8 +260,9 @@ export const WeeklySellerLevelsMatrix: React.FC<WeeklySellerLevelsMatrixProps> =
                     </td>
 
                     {activeLevels.map((lvl, idx) => {
-                      const ratio = levelRatios[idx] || 1;
-                      const levelTarget = Math.round(sellerAdjustedWeekTarget * ratio);
+                      const levelTarget = Math.round(
+                        lvl.revenueTarget * (weekWeightPct / 100) * (sharePct / 100) * avail.factor
+                      );
                       return (
                         <td key={lvl.level} className="p-3 text-right font-mono font-bold">
                           {isFullAbsence ? (
@@ -286,15 +290,66 @@ export const WeeklySellerLevelsMatrix: React.FC<WeeklySellerLevelsMatrixProps> =
               })
             )}
           </tbody>
+          {sellers.length > 0 && (
+            <tfoot>
+              <tr className="bg-slate-900 text-white font-bold border-t-2 border-slate-700 text-xs">
+                <td className="p-3">
+                  <div className="font-bold">Total da Equipe na Semana {selectedWeekNumber}</div>
+                  <div className="text-[10px] text-slate-400 font-normal">
+                    {sellers.length} vendedoras • Peso {weekWeightPct}%
+                  </div>
+                </td>
+                <td className="p-3 text-center font-mono text-emerald-400">
+                  {sellers
+                    .reduce((acc, s) => {
+                      const sp = (sellerShares && typeof sellerShares[s.id] === 'number')
+                        ? sellerShares[s.id]
+                        : (s.officialSharePercentage ?? (100 / Math.max(1, sellers.length)));
+                      return acc + sp;
+                    }, 0)
+                    .toFixed(1)}%
+                </td>
+                {activeLevels.map((lvl) => {
+                  const teamWeekLevelTarget = sellers.reduce((acc, s) => {
+                    const sp = (sellerShares && typeof sellerShares[s.id] === 'number')
+                      ? sellerShares[s.id]
+                      : (s.officialSharePercentage ?? (100 / Math.max(1, sellers.length)));
+                    const avail = getSellerIntervalAvailability(
+                      s.id,
+                      startDateStr,
+                      endDateStr,
+                      availabilities || [],
+                      workingDaysSettings
+                    );
+                    return (
+                      acc +
+                      Math.round(lvl.revenueTarget * (weekWeightPct / 100) * (sp / 100) * avail.factor)
+                    );
+                  }, 0);
+
+                  return (
+                    <td key={lvl.level} className="p-3 text-right font-mono text-amber-300 font-black text-xs">
+                      {formatCurrency(teamWeekLevelTarget)}
+                    </td>
+                  );
+                })}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 
       {/* Nota Explicativa do Cálculo */}
-      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-600 flex items-center gap-2">
-        <span className="font-bold text-slate-800">💡 Como o valor da vendedora é calculado:</span>
-        <span className="font-mono text-slate-700">
-          Meta Mensal (R$ {monthlyTarget.toLocaleString('pt-BR')}) × Peso da Semana ({weekWeightPct}%) × Participação da Vendedora (%) × Fator do Nível
-        </span>
+      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-600 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-slate-800">💡 Como o valor da vendedora é calculado:</span>
+          <span className="font-mono text-slate-700">
+            Meta Mensal do Nível × Peso da Semana ({weekWeightPct}%) × Participação da Vendedora (%) × Fator de Férias
+          </span>
+        </div>
+        <div className="text-[10px] text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
+          ✓ Valores sincronizados com a Escada de Metas Oficial
+        </div>
       </div>
     </div>
   );

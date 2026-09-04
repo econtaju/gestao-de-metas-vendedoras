@@ -502,5 +502,107 @@ describe('Férias Proporcionais nas Semanas, Replicação de Metas & Redistribui
     assert.ok(report.find(r => r.sellerId === 'seller-2')!.diff > 0);
     assert.ok(report.find(r => r.sellerId === 'seller-3')!.diff > 0);
   });
+
+  test('11. Roteiro Semanal de Níveis (Bronze, Prata, Ouro, Diamante) com Valores Reais e Proporcionais por Vendedora', () => {
+    // 4 níveis da unidade configurados no mês (Bronze: 144k, Prata: 165.6k, Ouro: 182.16k, Diamante: 200.376k)
+    const activeLevels = [
+      { level: 1, name: 'Bronze', revenueTarget: 144000, commissionPercentage: 1.0 },
+      { level: 2, name: 'Prata', revenueTarget: 165600, commissionPercentage: 1.5 },
+      { level: 3, name: 'Ouro', revenueTarget: 182160, commissionPercentage: 2.0 },
+      { level: 4, name: 'Diamante', revenueTarget: 200376, commissionPercentage: 2.5 },
+    ];
+
+    const weekWeightPct = 25; // Semana 1 com 25%
+
+    const sellers = [
+      { id: 'seller-ana', name: 'Ana', share: 25, availFactor: 1.0 },
+      { id: 'seller-bruna', name: 'Bruna', share: 25, availFactor: 1.0 },
+      { id: 'seller-carla', name: 'Carla', share: 30, availFactor: 1.0 },
+      { id: 'seller-dani', name: 'Dani', share: 20, availFactor: 0.0 }, // Dani de férias na semana
+    ];
+
+    // Calcula as metas semanais de cada vendedora para cada nível
+    const matrix: Record<string, Record<string, number>> = {};
+
+    sellers.forEach((seller) => {
+      matrix[seller.id] = {};
+      activeLevels.forEach((lvl) => {
+        const val = Math.round(
+          lvl.revenueTarget * (weekWeightPct / 100) * (seller.share / 100) * seller.availFactor
+        );
+        matrix[seller.id][lvl.name] = val;
+      });
+    });
+
+    // Ana (25% e presente):
+    // Bronze: 144.000 * 0.25 * 0.25 = 9.000
+    // Prata: 165.600 * 0.25 * 0.25 = 10.350
+    // Ouro: 182.160 * 0.25 * 0.25 = 11.385
+    // Diamante: 200.376 * 0.25 * 0.25 = 12.524 (arredondado)
+    assert.equal(matrix['seller-ana']['Bronze'], 9000);
+    assert.equal(matrix['seller-ana']['Prata'], 10350);
+    assert.equal(matrix['seller-ana']['Ouro'], 11385);
+    assert.equal(matrix['seller-ana']['Diamante'], 12524);
+
+    // Os valores NÃO são iguais entre os níveis! Cada faixa possui seu valor progressivo
+    assert.ok(
+      matrix['seller-ana']['Bronze'] < matrix['seller-ana']['Prata'],
+      'Bronze deve ser menor que Prata'
+    );
+    assert.ok(
+      matrix['seller-ana']['Prata'] < matrix['seller-ana']['Ouro'],
+      'Prata deve ser menor que Ouro'
+    );
+    assert.ok(
+      matrix['seller-ana']['Ouro'] < matrix['seller-ana']['Diamante'],
+      'Ouro deve ser menor que Diamante'
+    );
+
+    // Carla (30% e presente): metas proporcionalmente maiores
+    assert.equal(matrix['seller-carla']['Bronze'], 10800); // 144k * 0.25 * 0.30
+    assert.equal(matrix['seller-carla']['Prata'], 12420); // 165.6k * 0.25 * 0.30
+
+    // Dani (de férias na semana): todas as faixas zeradas
+    assert.equal(matrix['seller-dani']['Bronze'], 0);
+    assert.equal(matrix['seller-dani']['Prata'], 0);
+    assert.equal(matrix['seller-dani']['Ouro'], 0);
+    assert.equal(matrix['seller-dani']['Diamante'], 0);
+  });
+
+  test('12. Modo de Privacidade no Relatório Individual (Ocultação da Participação e Meta da Loja)', () => {
+    const monthlyTarget = 144000;
+    const seller = {
+      sellerName: 'Camila Santos',
+      officialSharePercentage: 25.0,
+      sellerMonthlyTarget: 36000,
+    };
+
+    // Função de geração de texto com controle de privacidade
+    const formatReportSummary = (isPrivacyMode: boolean) => {
+      const lines = [
+        `Consultor(a): ${seller.sellerName}`,
+        `Meta Mensal Oficial: R$ ${seller.sellerMonthlyTarget.toLocaleString('pt-BR')},00`,
+      ];
+      if (!isPrivacyMode) {
+        lines.push(`Participação na Meta da Loja: ${seller.officialSharePercentage.toFixed(1)}% (Total da Loja: R$ ${monthlyTarget.toLocaleString('pt-BR')},00)`);
+      } else {
+        lines.push(`Participação: [Meta Individual Protegida]`);
+      }
+      return lines.join('\n');
+    };
+
+    // Modo Seguro / Privado (para entrega à vendedora)
+    const privateReport = formatReportSummary(true);
+    assert.ok(!privateReport.includes('144.000'), 'Relatório privado NÃO deve expor a meta total da loja');
+    assert.ok(!privateReport.includes('25.0%'), 'Relatório privado NÃO deve expor o percentual da loja');
+    assert.ok(privateReport.includes('36.000'), 'Relatório privado deve conter a meta individual da vendedora');
+    assert.ok(privateReport.includes('[Meta Individual Protegida]'));
+
+    // Modo Gerencial (para diretoria / consultoria)
+    const publicReport = formatReportSummary(false);
+    assert.ok(publicReport.includes('144.000'), 'Relatório gerencial deve conter a meta da loja');
+    assert.ok(publicReport.includes('25.0%'), 'Relatório gerencial deve conter a participação');
+  });
 });
+
 

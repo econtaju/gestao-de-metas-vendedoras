@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   X,
   Printer,
@@ -9,8 +9,12 @@ import {
   Award,
   Palmtree,
   Clock,
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  Users,
 } from 'lucide-react';
-import { Seller, CommercialWeekPeriod, Company } from '../../types';
+import { Seller, CommercialWeekPeriod, Company, GoalLevel } from '../../types';
 import { formatCurrency } from '../../services/financialEngine';
 import { getSellerIntervalAvailability } from '../../services/availabilityEngine';
 import { useApp } from '../../context/AppContext';
@@ -32,6 +36,14 @@ interface SellerGoalCardProps {
   isOpen: boolean;
   onClose: () => void;
   monthNumber?: number;
+  activeLevels?: GoalLevel[];
+  allSellers?: {
+    sellerId: string;
+    sellerName: string;
+    officialSharePercentage: number;
+    seniorityLevel?: string;
+  }[];
+  onSelectSeller?: (sellerId: string) => void;
 }
 
 export const SellerGoalCardModal: React.FC<SellerGoalCardProps> = ({
@@ -46,8 +58,12 @@ export const SellerGoalCardModal: React.FC<SellerGoalCardProps> = ({
   isOpen,
   onClose,
   monthNumber = 9,
+  activeLevels,
+  allSellers = [],
+  onSelectSeller,
 }) => {
   const { availabilities, workingDaysSettings } = useApp();
+  const [isPrivacyMode, setIsPrivacyMode] = useState<boolean>(true);
 
   if (!isOpen || !seller) return null;
 
@@ -100,15 +116,19 @@ export const SellerGoalCardModal: React.FC<SellerGoalCardProps> = ({
   
   // Total de clientes/vendas necessárias no mês
   const monthlyClientsTarget = hasTicket ? Math.ceil(sellerMonthlyTarget / avgTicket) : null;
-  const sellerLevels = company?.levels?.slice(0, company.numberOfLevels) || [];
+  const sellerLevels = (activeLevels && activeLevels.length > 0)
+    ? activeLevels
+    : (company?.levels?.slice(0, company.numberOfLevels) || []);
 
   // Formatação da mensagem para WhatsApp
   const handleShareWhatsApp = () => {
     let text = `🎯 *PLANO DE METAS OFICIAL - ${monthName.toUpperCase()}/${year}*\n`;
     text += `🏢 *Empresa:* ${company.tradeName} | *Loja:* ${branchName}\n`;
     text += `👤 *Consultor(a):* ${seller.sellerName}\n`;
-    text += `📊 *Participação na Meta da Loja:* ${seller.officialSharePercentage.toFixed(1)}%\n\n`;
-    text += `💰 *SUA META MENSAL:* ${formatCurrency(sellerMonthlyTarget)}\n`;
+    if (!isPrivacyMode) {
+      text += `📊 *Participação na Meta da Loja:* ${seller.officialSharePercentage.toFixed(1)}%\n`;
+    }
+    text += `\n💰 *SUA META MENSAL:* ${formatCurrency(sellerMonthlyTarget)}\n`;
     if (hasAbsences) {
       text += `🌴 *(Ajustada proporcionalmente às suas férias/dias trabalhados no mês)*\n`;
     }
@@ -140,10 +160,14 @@ export const SellerGoalCardModal: React.FC<SellerGoalCardProps> = ({
 
     if (sellerLevels.length > 0) {
       text += `\n🏆 *ESCALA DE COMISSIONAMENTO:*\n`;
-      sellerLevels.forEach((lvl) => {
-        const lvlTarget = Math.round(sellerMonthlyTarget * (lvl.revenueTarget / (sellerLevels[0]?.revenueTarget || 1)));
+      sellerLevels.forEach((lvl, idx) => {
+        const baseLevel1 = sellerLevels[0]?.revenueTarget || 1;
+        const ratio = baseLevel1 > 0 ? lvl.revenueTarget / baseLevel1 : 1;
+        const lvlTarget = Math.round(
+          sellerMonthlyTarget * (idx === 0 ? 1 : (ratio > 0 ? ratio : (1 + idx * 0.15)))
+        );
         const comm = Math.round(lvlTarget * (lvl.commissionPercentage / 100));
-        text += `• ${lvl.name}: ${formatCurrency(lvlTarget)} ➔ ${lvl.commissionPercentage}% comissão (~${formatCurrency(comm)})\n`;
+        text += `• ${lvl.name || `Nível ${idx + 1}`}: ${formatCurrency(lvlTarget)} ➔ ${lvl.commissionPercentage}% comissão (~${formatCurrency(comm)})\n`;
       });
     }
 
@@ -161,7 +185,7 @@ export const SellerGoalCardModal: React.FC<SellerGoalCardProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto">
       <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full my-6 overflow-hidden border border-slate-200 print:m-0 print:p-0 print:border-none print:shadow-none print:max-w-full">
         {/* Header - Ações */}
-        <div className="p-4 bg-slate-900 text-white flex items-center justify-between print:hidden">
+        <div className="p-4 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 print:hidden">
           <div className="flex items-center gap-2">
             <div className="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-xl">
               <FileCheck className="w-5 h-5" />
@@ -174,7 +198,40 @@ export const SellerGoalCardModal: React.FC<SellerGoalCardProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {allSellers && allSellers.length > 1 && onSelectSeller && (
+              <div className="flex items-center gap-1.5 bg-slate-800 px-2.5 py-1 rounded-xl border border-slate-700">
+                <Users className="w-3.5 h-3.5 text-slate-400" />
+                <select
+                  value={seller.sellerId}
+                  onChange={(e) => onSelectSeller(e.target.value)}
+                  className="bg-transparent text-white text-xs font-bold outline-none cursor-pointer"
+                  title="Trocar de vendedora para emitir o relatório de outra consultora"
+                >
+                  {allSellers.map((s) => (
+                    <option key={s.sellerId} value={s.sellerId} className="bg-slate-900 text-white">
+                      {s.sellerName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Botão de Alternar Modo Privacidade */}
+            <button
+              type="button"
+              onClick={() => setIsPrivacyMode(!isPrivacyMode)}
+              title={isPrivacyMode ? 'Participação da loja está borrada/oculta. Clique para exibir.' : 'Clique para borrar a participação da loja e manter confidencialidade.'}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs ${
+                isPrivacyMode
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40 hover:bg-amber-500/30'
+                  : 'bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700'
+              }`}
+            >
+              {isPrivacyMode ? <EyeOff className="w-3.5 h-3.5 text-amber-300" /> : <Eye className="w-3.5 h-3.5 text-slate-400" />}
+              <span>{isPrivacyMode ? 'Participação Borrada' : 'Participação Visível'}</span>
+            </button>
+
             <button
               type="button"
               onClick={handleShareWhatsApp}
@@ -220,9 +277,24 @@ export const SellerGoalCardModal: React.FC<SellerGoalCardProps> = ({
               <span className="text-2xl font-black font-mono text-emerald-700 block">
                 {formatCurrency(sellerMonthlyTarget)}
               </span>
-              <span className="text-[11px] font-bold text-indigo-700 font-mono">
-                {seller.officialSharePercentage.toFixed(1)}% da Meta da Loja ({formatCurrency(monthlyTarget)})
-              </span>
+              {isPrivacyMode ? (
+                <div className="mt-1 flex flex-col sm:items-end gap-1">
+                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-[10px] font-bold text-amber-900 shadow-2xs">
+                    <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Meta Individual Protegida</span>
+                  </div>
+                  <span
+                    className="text-[11px] font-bold text-slate-400 font-mono filter blur-[3.5px] select-none pointer-events-none print:hidden"
+                    title="Participação da loja borrada para manter o sigilo entre as vendedoras"
+                  >
+                    {seller.officialSharePercentage.toFixed(1)}% da Meta da Loja ({formatCurrency(monthlyTarget)})
+                  </span>
+                </div>
+              ) : (
+                <span className="text-[11px] font-bold text-indigo-700 font-mono">
+                  {seller.officialSharePercentage.toFixed(1)}% da Meta da Loja ({formatCurrency(monthlyTarget)})
+                </span>
+              )}
             </div>
           </div>
 
@@ -358,8 +430,10 @@ export const SellerGoalCardModal: React.FC<SellerGoalCardProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
                 {sellerLevels.map((lvl, idx) => {
                   const baseLevel1 = sellerLevels[0]?.revenueTarget || 1;
-                  const ratio = lvl.revenueTarget / baseLevel1;
-                  const individualLevelTarget = Math.round(sellerMonthlyTarget * (idx === 0 ? 1 : ratio));
+                  const ratio = baseLevel1 > 0 ? lvl.revenueTarget / baseLevel1 : 1;
+                  const individualLevelTarget = Math.round(
+                    sellerMonthlyTarget * (idx === 0 ? 1 : (ratio > 0 ? ratio : (1 + idx * 0.15)))
+                  );
                   const estimatedComm = Math.round(individualLevelTarget * (lvl.commissionPercentage / 100));
 
                   return (
@@ -368,7 +442,7 @@ export const SellerGoalCardModal: React.FC<SellerGoalCardProps> = ({
                       className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 space-y-1.5 text-xs"
                     >
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-800">{lvl.name}</span>
+                        <span className="font-bold text-slate-800">{lvl.name || `Nível ${idx + 1}`}</span>
                         <span className="font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded text-[10px]">
                           {lvl.commissionPercentage}%
                         </span>

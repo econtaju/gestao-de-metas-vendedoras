@@ -12,7 +12,7 @@ import {
   Clock,
   AlertTriangle,
 } from 'lucide-react';
-import { CommercialWeekPeriod, TeamParticipationSummary, Company, Seller } from '../../types';
+import { CommercialWeekPeriod, TeamParticipationSummary, Company, Seller, GoalLevel } from '../../types';
 import { formatCurrency } from '../../services/financialEngine';
 import { getSellerIntervalAvailability } from '../../services/availabilityEngine';
 import { SellerGoalCardModal } from './SellerGoalCardModal';
@@ -26,6 +26,7 @@ interface GoalMatrixGridProps {
   monthName: string;
   year: number;
   monthNumber?: number;
+  activeLevels?: GoalLevel[];
   onOpenVacationRedistributionModal?: (sellerId?: string) => void;
 }
 
@@ -37,6 +38,7 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
   monthName = 'Mês',
   year = 2026,
   monthNumber = 9,
+  activeLevels,
   onOpenVacationRedistributionModal,
 }) => {
   const { activeCompany, companySellers, availabilities, workingDaysSettings } = useApp();
@@ -525,8 +527,15 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
           branchName={branchName}
           monthName={monthName}
           year={year}
+          monthNumber={monthNumber}
           monthlyTarget={monthlyTarget}
           weeks={safeWeeks}
+          activeLevels={activeLevels}
+          allSellers={safeSellers}
+          onSelectSeller={(sellerId) => {
+            const found = safeSellers.find((s) => s.sellerId === sellerId);
+            if (found) setSelectedSellerForReport(found);
+          }}
         />
       )}
     </div>

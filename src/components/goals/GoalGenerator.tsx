@@ -1601,6 +1601,7 @@ export const GoalGenerator: React.FC = () => {
         monthName={ALL_MONTHS.find((m) => m.number === selectedMonthNumber)?.name || 'Mês'}
         year={selectedYear}
         monthNumber={selectedMonthNumber}
+        activeLevels={calculatedLevels}
         onOpenVacationRedistributionModal={handleOpenVacationRedistributionModal}
       />
 
@@ -1609,7 +1610,8 @@ export const GoalGenerator: React.FC = () => {
         monthlyTarget={monthlyTarget}
         weeks={weeks}
         sellers={branchSellers}
-        activeLevels={activeLevels}
+        activeLevels={calculatedLevels}
+        sellerShares={existingMaster?.sellerShares}
         branchName={activeBranch?.name || 'Unidade Principal'}
         monthNumber={selectedMonthNumber}
         year={selectedYear}
