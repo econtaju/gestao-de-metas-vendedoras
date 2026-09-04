@@ -24,6 +24,7 @@ import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { handleTokenAction, syncUsersFromRemote } from './services/authService';
 import { ALLOWED_VIEWS_BY_ROLE } from './types';
 import { MobileBottomNav } from './components/layout/MobileBottomNav';
+import { OfflineStatusBanner } from './components/common/OfflineStatusBanner';
 
 const MainContent: React.FC = () => {
   const {
@@ -148,6 +149,9 @@ const MainContent: React.FC = () => {
           onOpenOnboarding={() => setIsOnboardingOpen(true)}
           onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
         />
+
+        {/* Banner de Status de Conexão e Sincronização Offline */}
+        <OfflineStatusBanner />
 
         {/* Scrollable Viewport with bottom compensation padding for mobile bottom bar */}
         <main className="flex-1 overflow-y-auto px-3 sm:px-6 md:px-8 py-4 sm:py-6 pb-24 lg:pb-8">

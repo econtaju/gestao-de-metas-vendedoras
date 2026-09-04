@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Company,
   Branch,
@@ -81,6 +81,7 @@ import {
   fetchSalesFromSupabase,
   deleteSaleFromSupabase,
 } from '../services/supabaseService';
+import { offlineSyncManager, OfflineQueueItem } from '../services/offlineSyncService';
 
 export type { ActiveView };
 
@@ -221,6 +222,13 @@ interface AppContextType {
   resetAllDataAndLogout: () => void;
   isUserManagementOpen: boolean;
   setIsUserManagementOpen: (open: boolean) => void;
+
+  // Resiliência Offline & Sincronização
+  isOnline: boolean;
+  isSyncing: boolean;
+  pendingSyncCount: number;
+  lastSyncTimestamp: number | null;
+  triggerManualSync: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -560,69 +568,217 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeSellerId, setActiveSellerId] = useState<string>('all');
   const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>([]);
 
-  // Sincronização inicial em background direto do Supabase (Nuvem)
-  useEffect(() => {
-    let isMounted = true;
-    async function loadCloudData() {
-      try {
-        const [cloudCompanies, cloudBranches, cloudSellers, cloudGoals, cloudSales] = await Promise.all([
-          fetchCompaniesFromSupabase(),
-          fetchBranchesFromSupabase(),
-          fetchSellersFromSupabase(),
-          fetchMasterGoalsFromSupabase(),
-          fetchSalesFromSupabase(),
-        ]);
+  // Resiliência Offline e Sincronização em Segundo Plano (Outbox Queue)
+  const [isOnline, setIsOnline] = useState<boolean>(() => offlineSyncManager.isOnline());
+  const [isSyncing, setIsSyncing] = useState<boolean>(() => offlineSyncManager.getIsSyncing());
+  const [pendingSyncCount, setPendingSyncCount] = useState<number>(() => offlineSyncManager.getQueue().length);
+  const [lastSyncTimestamp, setLastSyncTimestamp] = useState<number | null>(() => offlineSyncManager.getLastSyncTimestamp());
 
-        if (!isMounted) return;
-
-        if (cloudCompanies && cloudCompanies.length > 0) {
-          setCompanies((prev) => {
-            const map = new Map<string, Company>();
-            prev.forEach((c) => map.set(c.id, c));
-            cloudCompanies.forEach((c) => map.set(c.id, c));
-            return Array.from(map.values());
-          });
-        }
-
-        if (cloudBranches && cloudBranches.length > 0) {
-          setBranches((prev) => {
-            const map = new Map<string, Branch>();
-            prev.forEach((b) => map.set(b.id, b));
-            cloudBranches.forEach((b) => map.set(b.id, b));
-            return Array.from(map.values());
-          });
-        }
-
-        if (cloudSellers && cloudSellers.length > 0) {
-          setSellers((prev) => {
-            const map = new Map<string, Seller>();
-            prev.forEach((s) => map.set(s.id, s));
-            cloudSellers.forEach((s) => map.set(s.id, s));
-            return Array.from(map.values());
-          });
-        }
-
-        if (cloudGoals && Object.keys(cloudGoals).length > 0) {
-          setMasterGoals((prev) => ({ ...prev, ...cloudGoals }));
-        }
-
-        if (cloudSales && cloudSales.length > 0) {
-          setSales((prev) => {
-            const map = new Map<string, SaleRecord>();
-            prev.forEach((s) => map.set(s.id, s));
-            cloudSales.forEach((s) => map.set(s.id, s));
-            return Array.from(map.values());
-          });
-        }
-      } catch (err) {
-        console.warn('Sincronização em background do Supabase:', err);
-      }
-    }
-    loadCloudData();
-    return () => {
-      isMounted = false;
-    };
+  // Funções seguras de sincronização com proteção offline e enfileiramento resiliente
+  const safeSyncCompany = useCallback((company: Company) => {
+    syncCompanyToSupabase(company).then((ok) => {
+      if (!ok) offlineSyncManager.enqueueItem('sync_company', company.id, company);
+    }).catch(() => {
+      offlineSyncManager.enqueueItem('sync_company', company.id, company);
+    });
   }, []);
+
+  const safeDeleteCompany = useCallback((companyId: string) => {
+    deleteCompanyFromSupabase(companyId).then((ok) => {
+      if (!ok) offlineSyncManager.enqueueItem('delete_company', companyId, { id: companyId });
+    }).catch(() => {
+      offlineSyncManager.enqueueItem('delete_company', companyId, { id: companyId });
+    });
+  }, []);
+
+  const safeSyncBranch = useCallback((branch: Branch) => {
+    syncBranchToSupabase(branch).then((ok) => {
+      if (!ok) offlineSyncManager.enqueueItem('sync_branch', branch.id, branch);
+    }).catch(() => {
+      offlineSyncManager.enqueueItem('sync_branch', branch.id, branch);
+    });
+  }, []);
+
+  const safeDeleteBranch = useCallback((branchId: string) => {
+    deleteBranchFromSupabase(branchId).then((ok) => {
+      if (!ok) offlineSyncManager.enqueueItem('delete_branch', branchId, { id: branchId });
+    }).catch(() => {
+      offlineSyncManager.enqueueItem('delete_branch', branchId, { id: branchId });
+    });
+  }, []);
+
+  const safeSyncSeller = useCallback((seller: Seller) => {
+    syncSellerToSupabase(seller).then((ok) => {
+      if (!ok) offlineSyncManager.enqueueItem('sync_seller', seller.id, seller);
+    }).catch(() => {
+      offlineSyncManager.enqueueItem('sync_seller', seller.id, seller);
+    });
+  }, []);
+
+  const safeDeleteSeller = useCallback((sellerId: string) => {
+    deleteSellerFromSupabase(sellerId).then((ok) => {
+      if (!ok) offlineSyncManager.enqueueItem('delete_seller', sellerId, { id: sellerId });
+    }).catch(() => {
+      offlineSyncManager.enqueueItem('delete_seller', sellerId, { id: sellerId });
+    });
+  }, []);
+
+  const safeSyncSale = useCallback((sale: SaleRecord) => {
+    syncSaleToSupabase(sale).then((ok) => {
+      if (!ok) offlineSyncManager.enqueueItem('sync_sale', sale.id, sale);
+    }).catch(() => {
+      offlineSyncManager.enqueueItem('sync_sale', sale.id, sale);
+    });
+  }, []);
+
+  const safeDeleteSale = useCallback((saleId: string) => {
+    deleteSaleFromSupabase(saleId).then((ok) => {
+      if (!ok) offlineSyncManager.enqueueItem('delete_sale', saleId, { id: saleId });
+    }).catch(() => {
+      offlineSyncManager.enqueueItem('delete_sale', saleId, { id: saleId });
+    });
+  }, []);
+
+  const safeSyncMasterGoal = useCallback((goal: MonthlyMasterGoal) => {
+    syncMasterGoalToSupabase(goal).then((ok) => {
+      if (!ok) offlineSyncManager.enqueueItem('sync_master_goal', goal.id, goal);
+    }).catch(() => {
+      offlineSyncManager.enqueueItem('sync_master_goal', goal.id, goal);
+    });
+  }, []);
+
+  // Carrega e mescla dados da Nuvem (Supabase) respeitando alterações locais pendentes
+  const loadCloudData = useCallback(async () => {
+    try {
+      const [cloudCompanies, cloudBranches, cloudSellers, cloudGoals, cloudSales] = await Promise.all([
+        fetchCompaniesFromSupabase(),
+        fetchBranchesFromSupabase(),
+        fetchSellersFromSupabase(),
+        fetchMasterGoalsFromSupabase(),
+        fetchSalesFromSupabase(),
+      ]);
+
+      const pendingQueue = offlineSyncManager.getQueue();
+      const pendingIds = new Set(pendingQueue.map((item) => item.entityId));
+
+      if (cloudCompanies && cloudCompanies.length > 0) {
+        setCompanies((prev) => {
+          const map = new Map<string, Company>();
+          prev.forEach((c) => map.set(c.id, c));
+          cloudCompanies.forEach((c) => {
+            if (!pendingIds.has(c.id)) {
+              map.set(c.id, c);
+            }
+          });
+          return Array.from(map.values());
+        });
+      }
+
+      if (cloudBranches && cloudBranches.length > 0) {
+        setBranches((prev) => {
+          const map = new Map<string, Branch>();
+          prev.forEach((b) => map.set(b.id, b));
+          cloudBranches.forEach((b) => {
+            if (!pendingIds.has(b.id)) {
+              map.set(b.id, b);
+            }
+          });
+          return Array.from(map.values());
+        });
+      }
+
+      if (cloudSellers && cloudSellers.length > 0) {
+        setSellers((prev) => {
+          const map = new Map<string, Seller>();
+          prev.forEach((s) => map.set(s.id, s));
+          cloudSellers.forEach((s) => {
+            if (!pendingIds.has(s.id)) {
+              map.set(s.id, s);
+            }
+          });
+          return Array.from(map.values());
+        });
+      }
+
+      if (cloudGoals && Object.keys(cloudGoals).length > 0) {
+        setMasterGoals((prev) => {
+          const next = { ...prev };
+          Object.entries(cloudGoals).forEach(([k, g]) => {
+            if (!pendingIds.has(g.id)) {
+              next[k] = g;
+            }
+          });
+          return next;
+        });
+      }
+
+      if (cloudSales && cloudSales.length > 0) {
+        setSales((prev) => {
+          const map = new Map<string, SaleRecord>();
+          prev.forEach((s) => map.set(s.id, s));
+          cloudSales.forEach((s) => {
+            if (!pendingIds.has(s.id)) {
+              map.set(s.id, s);
+            }
+          });
+          return Array.from(map.values());
+        });
+      }
+      setLastSyncTimestamp(Date.now());
+    } catch (err) {
+      console.warn('Sincronização em background do Supabase:', err);
+    }
+  }, []);
+
+  // Gatilho manual de sincronização chamado pelo botão na Topbar / Banner
+  const triggerManualSync = useCallback(async () => {
+    await offlineSyncManager.checkRealConnection();
+    await offlineSyncManager.processQueue();
+    await loadCloudData();
+    setLastSyncTimestamp(offlineSyncManager.getLastSyncTimestamp());
+  }, [loadCloudData]);
+
+  // Listeners de conectividade e sincronização em segundo plano
+  useEffect(() => {
+    const unsubNet = offlineSyncManager.subscribeToNetwork((online) => setIsOnline(online));
+    const unsubQueue = offlineSyncManager.subscribeToQueue((q) => setPendingSyncCount(q.length));
+    const unsubSync = offlineSyncManager.subscribeToSync((syncing) => setIsSyncing(syncing));
+
+    // Inicialização: se houver fila pendente, tenta descarregar e depois recarrega a nuvem
+    offlineSyncManager.processQueue().then(() => {
+      loadCloudData();
+    });
+
+    const handleOnline = () => {
+      offlineSyncManager.processQueue().then(() => {
+        loadCloudData();
+      });
+    };
+
+    const handleFocus = () => {
+      offlineSyncManager.checkRealConnection().catch(() => {});
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('focus', handleFocus);
+    }
+
+    const interval = setInterval(() => {
+      offlineSyncManager.checkRealConnection().catch(() => {});
+    }, 30000);
+
+    return () => {
+      unsubNet();
+      unsubQueue();
+      unsubSync();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('focus', handleFocus);
+      }
+      clearInterval(interval);
+    };
+  }, [loadCloudData]);
 
   // Sync to localStorage
   useEffect(() => {
@@ -901,7 +1057,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (s.companyId === activeCompany.id && s.branchId !== primaryBranch.id) {
             changed = true;
             const updated = { ...s, branchId: primaryBranch.id };
-            syncSellerToSupabase(updated);
+            safeSyncSeller(updated);
             return updated;
           }
           return s;
@@ -1101,7 +1257,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: companyData.createdAt || new Date().toISOString(),
     };
     setCompanies((prev) => [...prev, newCompany]);
-    syncCompanyToSupabase(newCompany);
+    safeSyncCompany(newCompany);
 
     // Garante que a matriz seja criada imediatamente para esta nova empresa
     const matrizBranch: Branch = {
@@ -1119,7 +1275,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return prev;
     });
-    syncBranchToSupabase(matrizBranch);
+    safeSyncBranch(matrizBranch);
 
     setActiveCompanyId(id);
     return id;
@@ -1130,7 +1286,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map((c) => {
         if (c.id === id) {
           const updated = { ...c, ...updates };
-          syncCompanyToSupabase(updated);
+          safeSyncCompany(updated);
           return updated;
         }
         return c;
@@ -1147,7 +1303,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setBranches((prev) => prev.filter((b) => b.companyId !== id));
     setSellers((prev) => prev.filter((s) => s.companyId !== id));
     setSales((prev) => prev.filter((s) => s.companyId !== id));
-    deleteCompanyFromSupabase(id);
+    safeDeleteCompany(id);
     const remaining = companies.filter((c) => c.id !== id);
     if (remaining.length > 0) {
       setActiveCompanyId(remaining[0].id);
@@ -1158,7 +1314,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const id = branchData.id || `branch-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
     const newBranch: Branch = { ...branchData, id };
     setBranches((prev) => [...prev, newBranch]);
-    syncBranchToSupabase(newBranch);
+    safeSyncBranch(newBranch);
     return id;
   };
 
@@ -1167,7 +1323,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map((b) => {
         if (b.id === id) {
           const updated = { ...b, ...updates };
-          syncBranchToSupabase(updated);
+          safeSyncBranch(updated);
           return updated;
         }
         return b;
@@ -1177,14 +1333,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteBranch = (id: string) => {
     setBranches((prev) => prev.filter((b) => b.id !== id));
-    deleteBranchFromSupabase(id);
+    safeDeleteBranch(id);
   };
 
   const addSeller = (sellerData: (Omit<Seller, 'id'> & { id?: string })): string => {
     const id = sellerData.id || `seller-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const newSeller: Seller = { ...sellerData, id };
     setSellers((prev) => [...prev, newSeller]);
-    syncSellerToSupabase(newSeller);
+    safeSyncSeller(newSeller);
     return id;
   };
 
@@ -1196,7 +1352,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: `seller-${timestamp}-${index}-${Math.random().toString(36).substring(2, 6)}`,
     }));
     setSellers((prev) => [...prev, ...createdList]);
-    createdList.forEach((s) => syncSellerToSupabase(s));
+    createdList.forEach((s) => safeSyncSeller(s));
     return createdList.length;
   };
 
@@ -1205,7 +1361,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map((s) => {
         if (s.id === id) {
           const updated = { ...s, ...updates };
-          syncSellerToSupabase(updated);
+          safeSyncSeller(updated);
           return updated;
         }
         return s;
@@ -1215,7 +1371,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteSeller = (id: string) => {
     setSellers((prev) => prev.filter((s) => s.id !== id));
-    deleteSellerFromSupabase(id);
+    safeDeleteSeller(id);
   };
 
   const addSale = (saleData: Omit<SaleRecord, 'id' | 'createdAt'>): string => {
@@ -1226,7 +1382,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
     setSales((prev) => [...prev, newSale]);
-    syncSaleToSupabase(newSale);
+    safeSyncSale(newSale);
     return id;
   };
 
@@ -1235,7 +1391,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map((s) => {
         if (s.id === id) {
           const updated = { ...s, ...updates };
-          syncSaleToSupabase(updated);
+          safeSyncSale(updated);
           return updated;
         }
         return s;
@@ -1245,7 +1401,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteSale = (id: string) => {
     setSales((prev) => prev.filter((s) => s.id !== id));
-    deleteSaleFromSupabase(id);
+    safeDeleteSale(id);
   };
 
   const batchAddSales = (newSales: Omit<SaleRecord, 'id' | 'createdAt'>[]): number => {
@@ -1256,7 +1412,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: now,
     }));
     setSales((prev) => [...prev, ...created]);
-    created.forEach((s) => syncSaleToSupabase(s));
+    created.forEach((s) => safeSyncSale(s));
     return created.length;
   };
 
@@ -1674,7 +1830,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updatedAt: new Date().toISOString(),
       },
     }));
-    syncMasterGoalToSupabase(goal);
+    safeSyncMasterGoal(goal);
   };
 
   /**
@@ -1713,7 +1869,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }));
         }
 
-        next[key] = {
+        const updatedGoal = {
           id: existing?.id || `goal-${activeCompanyId}-${branch.id}-${year}-${monthNumber}`,
           companyId: activeCompanyId,
           branchId: branch.id,
@@ -1726,11 +1882,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           weeks: updatedWeeks,
           totalWeight: updatedWeeks.reduce((acc, w) => acc + w.weightPercentage, 0),
           isValid: true,
-          commissionRuleType: 'monthly',
-          status: existing?.status === 'published' ? 'published' : 'draft',
+          commissionRuleType: 'monthly' as const,
+          status: (existing?.status === 'published' ? 'published' : 'draft') as 'published' | 'draft',
           updatedAt: new Date().toISOString(),
           publishedAt: existing?.publishedAt,
         };
+        next[key] = updatedGoal;
+        safeSyncMasterGoal(updatedGoal);
       });
       return next;
     });
@@ -1765,7 +1923,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       [key!]: publishedGoal,
     }));
-    syncMasterGoalToSupabase(publishedGoal);
+    safeSyncMasterGoal(publishedGoal);
 
     // 2. Sincroniza as metas dos vendedores da filial para refletir a nova meta mensal e semanal
     const branchSellers = sellers.filter(
@@ -1791,7 +1949,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               monthlyTarget: sellerMonthlyTarget,
               weeklyTarget: sellerWeeklyTarget,
             };
-            syncSellerToSupabase(updatedSeller);
+            safeSyncSeller(updatedSeller);
             return updatedSeller;
           }
           return s;
@@ -2073,7 +2231,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             officialSharePercentage: updated.officialSharePercentage,
             shareOriginType: s.id === changedSellerId ? 'manual' : (s.shareOriginType || 'adjusted'),
           };
-          syncSellerToSupabase(newSellerObj);
+          safeSyncSeller(newSellerObj);
           return newSellerObj;
         }
         return s;
@@ -2259,6 +2417,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         resetAllDataAndLogout,
         isUserManagementOpen,
         setIsUserManagementOpen,
+        isOnline,
+        isSyncing,
+        pendingSyncCount,
+        lastSyncTimestamp,
+        triggerManualSync,
       }}
     >
       {children}

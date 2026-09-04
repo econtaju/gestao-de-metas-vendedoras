@@ -16,6 +16,10 @@ import {
   ShieldCheck,
   User,
   Menu,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  Cloud,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -45,6 +49,11 @@ export const Topbar: React.FC<TopbarProps> = ({ onOpenOnboarding, onOpenMobileMe
     logout,
     resetAllDataAndLogout,
     setIsUserManagementOpen,
+    isOnline,
+    isSyncing,
+    pendingSyncCount,
+    lastSyncTimestamp,
+    triggerManualSync,
   } = useApp();
 
   const [showAlertsDropdown, setShowAlertsDropdown] = useState(false);
@@ -172,6 +181,53 @@ export const Topbar: React.FC<TopbarProps> = ({ onOpenOnboarding, onOpenMobileMe
             </select>
           </div>
         )}
+
+        {/* Indicador de Conectividade / Status Nuvem Supabase */}
+        <button
+          type="button"
+          onClick={() => triggerManualSync()}
+          disabled={isSyncing}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold transition border cursor-pointer ${
+            !isOnline
+              ? 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100'
+              : pendingSyncCount > 0
+              ? 'bg-sky-50 border-sky-300 text-sky-800 hover:bg-sky-100'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+          }`}
+          title={
+            !isOnline
+              ? `Modo Offline (${pendingSyncCount} alterações locais salvas). Clique para tentar reconectar.`
+              : pendingSyncCount > 0
+              ? `${pendingSyncCount} alteração(ões) pendente(s). Clique para sincronizar agora.`
+              : `Nuvem Conectada • Última sincronização: ${
+                  lastSyncTimestamp
+                    ? new Date(lastSyncTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : 'Recente'
+                }`
+          }
+        >
+          {!isOnline ? (
+            <>
+              <WifiOff className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+              <span>Offline {pendingSyncCount > 0 ? `(${pendingSyncCount})` : ''}</span>
+            </>
+          ) : isSyncing ? (
+            <>
+              <RefreshCw className="w-3.5 h-3.5 text-sky-600 animate-spin" />
+              <span className="hidden sm:inline">Sincronizando...</span>
+            </>
+          ) : pendingSyncCount > 0 ? (
+            <>
+              <RefreshCw className="w-3.5 h-3.5 text-sky-600" />
+              <span>Pendente ({pendingSyncCount})</span>
+            </>
+          ) : (
+            <>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="hidden md:inline">Nuvem Conectada</span>
+            </>
+          )}
+        </button>
 
         {/* Alerts Notification Bell */}
         <div className="relative">

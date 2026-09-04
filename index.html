@@ -12,28 +12,21 @@
     <meta property="og:description" content="Sistema executivo de planejamento e simulação de metas comerciais, comissões e rentabilidade." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#059669" />
     <script>
       (function() {
         try {
-          // DESREGISTRO TOTAL DE SERVICE WORKERS LEGADOS
-          if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(function(registrations) {
-              for (var i = 0; i < registrations.length; i++) {
-                registrations[i].unregister();
-              }
+          // REGISTRO DE SERVICE WORKER PARA RESILIÊNCIA OFFLINE-FIRST
+          if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+            window.addEventListener('load', function() {
+              navigator.serviceWorker.register('/sw.js').catch(function(err) {
+                console.warn('[PWA] Service Worker não ativado em ambiente de teste ou file://:', err);
+              });
             });
           }
 
-          // LIMPEZA DE CACHESTORAGE DO NAVEGADOR
-          if (typeof window !== 'undefined' && 'caches' in window) {
-            caches.keys().then(function(names) {
-              for (var j = 0; j < names.length; j++) {
-                caches.delete(names[j]);
-              }
-            });
-          }
-
-          // FORÇA LIMPEZA DE CACHE E RESET PARA EXIGIR LOGIN
+          // Controle de versão de sessão
           var BUILD_VERSION = 'gmc_build_v6_force_login_auth_2026';
           if (typeof localStorage !== 'undefined') {
             var current = localStorage.getItem('gmc_clean_version');
