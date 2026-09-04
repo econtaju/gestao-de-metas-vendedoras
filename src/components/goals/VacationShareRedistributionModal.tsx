@@ -13,6 +13,9 @@ import {
   AlertTriangle,
   Info,
   DollarSign,
+  Plus,
+  RotateCcw,
+  Check,
 } from 'lucide-react';
 import { Seller, SellerAvailability, WorkingDaysSettings, CommercialWeekPeriod } from '../../types';
 import { formatCurrency, formatPercent } from '../../services/financialEngine';
@@ -39,7 +42,7 @@ interface VacationShareRedistributionModalProps {
   onApplyNewShares: (newShares: Record<string, number>, logDescription: string) => void;
 }
 
-type RedistributionStrategy = 'equal' | 'proportional' | 'single' | 'custom';
+type RedistributionStrategy = 'custom' | 'single' | 'equal' | 'proportional';
 
 export const VacationShareRedistributionModal: React.FC<VacationShareRedistributionModalProps> = ({
   isOpen,
@@ -122,20 +125,97 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
     return sellersWithAvail.filter((s) => s.sellerId !== activeAbsentSeller?.sellerId);
   }, [sellersWithAvail, activeAbsentSeller]);
 
-  // Estratégia de redistribuição selecionada
-  const [strategy, setStrategy] = useState<RedistributionStrategy>('equal');
+  // Estratégia de redistribuição selecionada (default 'custom' para divisão individual direta)
+  const [strategy, setStrategy] = useState<RedistributionStrategy>('custom');
 
   // Vendedora única escolhida na opção 'single'
   const [singleRecipientId, setSingleRecipientId] = useState<string>(() => {
     return recipientSellers[0]?.sellerId || '';
   });
 
-  // Rateio personalizado em 'custom' (sellerId -> shareAdd)
-  const [customSharesAdd, setCustomSharesAdd] = useState<Record<string, number>>({});
+  // Modo de input na divisão individual: em Reais (R$) ou em Porcentagem (%)
+  const [customUnit, setCustomUnit] = useState<'currency' | 'percent'>('currency');
 
-  // Cota liberada da vendedora de férias (em %)
+  // Alocações manuais individuais em R$ (sellerId -> valor adicional em R$)
+  const [customAmountsAdd, setCustomAmountsAdd] = useState<Record<string, number>>({});
+
+  // Cota liberada da vendedora de férias (em % e em R$)
   const shareToRedistribute = activeAbsentSeller?.uncoveredShare || 0;
   const targetToRedistribute = activeAbsentSeller?.uncoveredTarget || 0;
+
+  // Totais da alocação individual personalizada
+  const totalCustomAllocatedTarget = useMemo(() => {
+    return Object.values(customAmountsAdd).reduce((acc, v) => acc + (Number(v) || 0), 0);
+  }, [customAmountsAdd]);
+
+  const totalCustomAllocatedShare = useMemo(() => {
+    if (monthlyTarget <= 0) return 0;
+    return Math.round((totalCustomAllocatedTarget / monthlyTarget) * 1000) / 10;
+  }, [totalCustomAllocatedTarget, monthlyTarget]);
+
+  const remainingTargetToAllocate = Math.round(targetToRedistribute - totalCustomAllocatedTarget);
+  const remainingShareToAllocate = Math.round((shareToRedistribute - totalCustomAllocatedShare) * 10) / 10;
+
+  const isCustomAllocationComplete =
+    Math.abs(remainingTargetToAllocate) <= 2 || Math.abs(remainingShareToAllocate) <= 0.05;
+
+  // Handlers para edição individual de cada vendedora
+  const handleSetSellerAmount = (sellerId: string, amount: number) => {
+    const safeAmount = Math.max(0, Math.round(amount));
+    setCustomAmountsAdd((prev) => ({
+      ...prev,
+      [sellerId]: safeAmount,
+    }));
+  };
+
+  const handleSetSellerShare = (sellerId: string, percentVal: number) => {
+    const safePercent = Math.max(0, percentVal);
+    const calculatedTarget = Math.round(monthlyTarget * (safePercent / 100));
+    setCustomAmountsAdd((prev) => ({
+      ...prev,
+      [sellerId]: calculatedTarget,
+    }));
+  };
+
+  const handleAllocateRemainingToSeller = (sellerId: string) => {
+    const current = customAmountsAdd[sellerId] || 0;
+    const canAdd = Math.max(0, remainingTargetToAllocate);
+    setCustomAmountsAdd((prev) => ({
+      ...prev,
+      [sellerId]: current + canAdd,
+    }));
+  };
+
+  const handleResetSellerAmount = (sellerId: string) => {
+    setCustomAmountsAdd((prev) => {
+      const next = { ...prev };
+      delete next[sellerId];
+      return next;
+    });
+  };
+
+  const handleDistributeRemainingEqually = () => {
+    if (remainingTargetToAllocate <= 0 || recipientSellers.length === 0) return;
+    const unfilledSellers = recipientSellers.filter((s) => !(customAmountsAdd[s.sellerId] > 0));
+    const targetGroup = unfilledSellers.length > 0 ? unfilledSellers : recipientSellers;
+    const perSeller = Math.floor(remainingTargetToAllocate / targetGroup.length);
+
+    setCustomAmountsAdd((prev) => {
+      const updated = { ...prev };
+      let allocatedSoFar = 0;
+      targetGroup.forEach((s, idx) => {
+        const isLast = idx === targetGroup.length - 1;
+        const toAdd = isLast ? remainingTargetToAllocate - allocatedSoFar : perSeller;
+        allocatedSoFar += toAdd;
+        updated[s.sellerId] = (updated[s.sellerId] || 0) + toAdd;
+      });
+      return updated;
+    });
+  };
+
+  const handleClearAllCustom = () => {
+    setCustomAmountsAdd({});
+  };
 
   // 2. Cálculo da nova distribuição simulada
   const previewShares = useMemo(() => {
@@ -155,7 +235,24 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
       return result;
     }
 
-    if (strategy === 'single') {
+    if (strategy === 'custom') {
+      // Divisão individual por vendedora
+      recipientSellers.forEach((s) => {
+        const addedTarget = customAmountsAdd[s.sellerId] || 0;
+        const addedShare = monthlyTarget > 0 ? (addedTarget / monthlyTarget) * 100 : 0;
+        result[s.sellerId] = Math.round((s.baseShare + addedShare) * 10) / 10;
+      });
+
+      // Se a alocação estiver completa, garante fechamento estrito em 100%
+      if (isCustomAllocationComplete) {
+        const currentSum = Object.values(result).reduce((acc, v) => acc + v, 0);
+        const diff = Math.round((100 - currentSum) * 10) / 10;
+        if (diff !== 0 && recipientSellers.length > 0) {
+          const firstEdited = recipientSellers.find((s) => (customAmountsAdd[s.sellerId] || 0) > 0) || recipientSellers[0];
+          result[firstEdited.sellerId] = Math.round((result[firstEdited.sellerId] + diff) * 10) / 10;
+        }
+      }
+    } else if (strategy === 'single') {
       // 100% da sobra vai para a vendedora única selecionada
       recipientSellers.forEach((s) => {
         if (s.sellerId === singleRecipientId) {
@@ -167,10 +264,15 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
     } else if (strategy === 'equal') {
       // Divisão igualitária entre todas as presentes
       const extraPerSeller = Math.round((shareToRedistribute / recipientSellers.length) * 10) / 10;
-      recipientSellers.forEach((s, idx) => {
-        // Compensação de arredondamento no último item para cravar exatamente 100%
+      recipientSellers.forEach((s) => {
         result[s.sellerId] = Math.round((s.baseShare + extraPerSeller) * 10) / 10;
       });
+      // Ajuste de resíduo
+      const currentSum = Object.values(result).reduce((acc, v) => acc + v, 0);
+      const diff = Math.round((100 - currentSum) * 10) / 10;
+      if (diff !== 0 && recipientSellers.length > 0) {
+        result[recipientSellers[0].sellerId] = Math.round((result[recipientSellers[0].sellerId] + diff) * 10) / 10;
+      }
     } else if (strategy === 'proportional') {
       // Divisão proporcional à participação atual das presentes
       const totalPresentBase = recipientSellers.reduce((sum, s) => sum + s.baseShare, 0);
@@ -179,20 +281,11 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
         const extra = Math.round(shareToRedistribute * ratio * 10) / 10;
         result[s.sellerId] = Math.round((s.baseShare + extra) * 10) / 10;
       });
-    } else if (strategy === 'custom') {
-      recipientSellers.forEach((s) => {
-        const add = customSharesAdd[s.sellerId] || 0;
-        result[s.sellerId] = Math.round((s.baseShare + add) * 10) / 10;
-      });
-    }
-
-    // Ajuste fino para fechar exatamente em 100%
-    const currentSum = Object.values(result).reduce((acc, v) => acc + v, 0);
-    const diff = Math.round((100 - currentSum) * 10) / 10;
-    if (diff !== 0 && recipientSellers.length > 0) {
-      const targetSellerId = strategy === 'single' ? singleRecipientId : recipientSellers[0].sellerId;
-      if (result[targetSellerId] !== undefined) {
-        result[targetSellerId] = Math.round((result[targetSellerId] + diff) * 10) / 10;
+      // Ajuste de resíduo
+      const currentSum = Object.values(result).reduce((acc, v) => acc + v, 0);
+      const diff = Math.round((100 - currentSum) * 10) / 10;
+      if (diff !== 0 && recipientSellers.length > 0) {
+        result[recipientSellers[0].sellerId] = Math.round((result[recipientSellers[0].sellerId] + diff) * 10) / 10;
       }
     }
 
@@ -203,7 +296,9 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
     shareToRedistribute,
     strategy,
     singleRecipientId,
-    customSharesAdd,
+    customAmountsAdd,
+    isCustomAllocationComplete,
+    monthlyTarget,
     sellersWithAvail,
   ]);
 
@@ -211,22 +306,29 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
     return Math.round(Object.values(previewShares).reduce((acc, v) => acc + v, 0) * 10) / 10;
   }, [previewShares]);
 
-  const isPreviewValid = Math.abs(100 - totalPreviewPercentage) < 0.1;
+  const isPreviewValid =
+    strategy === 'custom'
+      ? isCustomAllocationComplete && Math.abs(100 - totalPreviewPercentage) < 0.2
+      : Math.abs(100 - totalPreviewPercentage) < 0.1;
 
   // Executa a confirmação e aplica as novas porcentagens
   const handleConfirm = () => {
     if (!isPreviewValid) return;
 
     let desc = '';
-    if (strategy === 'single') {
+    if (strategy === 'custom') {
+      const parts = recipientSellers
+        .filter((s) => (customAmountsAdd[s.sellerId] || 0) > 0)
+        .map((s) => `${s.sellerName} (+${formatCurrency(customAmountsAdd[s.sellerId] || 0)})`)
+        .join(', ');
+      desc = `Cobertura individual de férias: cota de ${activeAbsentSeller?.sellerName} (${formatCurrency(targetToRedistribute)}) distribuída entre: ${parts || 'equipe'}.`;
+    } else if (strategy === 'single') {
       const targetSeller = recipientSellers.find((s) => s.sellerId === singleRecipientId);
       desc = `Cobertura de férias: cota de ${activeAbsentSeller?.sellerName} (${shareToRedistribute}%) transferida integralmente para ${targetSeller?.sellerName}.`;
     } else if (strategy === 'equal') {
       desc = `Cobertura de férias: cota de ${activeAbsentSeller?.sellerName} (${shareToRedistribute}%) dividida igualmente entre as ${recipientSellers.length} vendedoras presentes.`;
-    } else if (strategy === 'proportional') {
-      desc = `Cobertura de férias: cota de ${activeAbsentSeller?.sellerName} (${shareToRedistribute}%) redistribuída proporcionalmente entre a equipe presente.`;
     } else {
-      desc = `Cobertura de férias: cota de ${activeAbsentSeller?.sellerName} (${shareToRedistribute}%) redistribuída manualmente conforme rateio do gestor.`;
+      desc = `Cobertura de férias: cota de ${activeAbsentSeller?.sellerName} (${shareToRedistribute}%) redistribuída proporcionalmente entre a equipe presente.`;
     }
 
     onApplyNewShares(previewShares, desc);
@@ -235,7 +337,7 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full my-6 overflow-hidden border border-slate-200">
+      <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full my-6 overflow-hidden border border-slate-200">
         {/* Header do Modal */}
         <div className="p-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -247,7 +349,7 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
                 Redistribuição & Cobertura de Férias
               </h3>
               <p className="text-xs text-slate-300">
-                Transfira a cota restante da vendedora ausente para manter 100% da meta da loja ({monthName}/{year})
+                Divida o valor que vai faltar entre as demais vendedoras até atingir a meta integral da loja ({monthName}/{year})
               </p>
             </div>
           </div>
@@ -261,7 +363,7 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
           </button>
         </div>
 
-        <div className="p-5 sm:p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+        <div className="p-5 sm:p-6 space-y-5 max-h-[78vh] overflow-y-auto">
           {/* Alerta inicial se nenhuma vendedora tiver férias */}
           {absentSellers.length === 0 ? (
             <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-center space-y-2">
@@ -270,7 +372,7 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
                 Nenhuma vendedora possui férias cadastradas para este mês ({monthName}/{year}).
               </p>
               <p className="text-[11px] text-slate-500">
-                Você pode registrar férias e atestados na aba <strong>"Disponibilidade & Férias"</strong> ou selecionar manualmente uma vendedora abaixo para rebalancear a equipe.
+                Cadastre as férias na aba <strong>"Disponibilidade & Férias"</strong> ou selecione uma vendedora abaixo para rebalancear a equipe.
               </p>
             </div>
           ) : (
@@ -293,7 +395,10 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
                     <button
                       key={s.sellerId}
                       type="button"
-                      onClick={() => setSelectedAbsentSellerId(s.sellerId)}
+                      onClick={() => {
+                        setSelectedAbsentSellerId(s.sellerId);
+                        setCustomAmountsAdd({});
+                      }}
                       className={`p-3 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
                         isSelected
                           ? 'bg-amber-50/80 border-amber-400 ring-2 ring-amber-200'
@@ -323,93 +428,85 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
 
           {/* Card Resumo do Diagnóstico da Cota a Repartir */}
           {activeAbsentSeller && (
-            <div className="bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border border-amber-200 rounded-2xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
+            <div className="bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border border-amber-300/80 rounded-2xl p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <span className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
-                  <Calculator className="w-4 h-4 text-amber-600" />
-                  Cota restante a ser distribuída para as demais:
+                  <Calculator className="w-4 h-4 text-amber-700" />
+                  Valor que vai faltar e precisa ser distribuído:
                 </span>
-                <span className="text-xs font-mono font-bold bg-amber-200 text-amber-900 px-2.5 py-0.5 rounded-full">
-                  +{shareToRedistribute.toFixed(1)}% ({formatCurrency(targetToRedistribute)})
+                <span className="text-xs sm:text-sm font-mono font-black bg-amber-200 text-amber-950 px-3 py-1 rounded-full border border-amber-300 shadow-2xs">
+                  {formatCurrency(targetToRedistribute)} (+{shareToRedistribute.toFixed(1)}%)
                 </span>
               </div>
 
               <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                <div className="bg-white/80 p-2 rounded-xl border border-amber-200/80">
-                  <span className="text-[10px] text-slate-500 block">Cota Normal</span>
-                  <strong className="text-slate-800 font-mono">
-                    {activeAbsentSeller.baseShare.toFixed(1)}% ({formatCurrency(activeAbsentSeller.baseTarget)})
+                <div className="bg-white/80 p-2.5 rounded-xl border border-amber-200/80">
+                  <span className="text-[10px] text-slate-500 block">Cota Normal (Mês Cheio)</span>
+                  <strong className="text-slate-800 font-mono text-xs sm:text-sm">
+                    {formatCurrency(activeAbsentSeller.baseTarget)}
                   </strong>
+                  <span className="text-[10px] text-slate-400 block font-mono">
+                    ({activeAbsentSeller.baseShare.toFixed(1)}%)
+                  </span>
                 </div>
-                <div className="bg-white/80 p-2 rounded-xl border border-amber-200/80">
-                  <span className="text-[10px] text-emerald-600 block font-semibold">Cota Dela (Trabalhada)</span>
-                  <strong className="text-emerald-700 font-mono">
-                    {activeAbsentSeller.effectiveShare.toFixed(1)}% ({formatCurrency(activeAbsentSeller.effectiveTarget)})
+                <div className="bg-white/80 p-2.5 rounded-xl border border-amber-200/80">
+                  <span className="text-[10px] text-emerald-700 block font-bold">Cota Dela (Dias Trabalhados)</span>
+                  <strong className="text-emerald-700 font-mono text-xs sm:text-sm">
+                    {formatCurrency(activeAbsentSeller.effectiveTarget)}
                   </strong>
+                  <span className="text-[10px] text-emerald-600 block font-mono">
+                    ({activeAbsentSeller.effectiveShare.toFixed(1)}%)
+                  </span>
                 </div>
-                <div className="bg-amber-100/70 p-2 rounded-xl border border-amber-300">
-                  <span className="text-[10px] text-amber-800 block font-bold">Sobra a Cobrir</span>
-                  <strong className="text-amber-950 font-mono">
-                    +{shareToRedistribute.toFixed(1)}% ({formatCurrency(targetToRedistribute)})
+                <div className="bg-amber-100/90 p-2.5 rounded-xl border border-amber-300 shadow-2xs">
+                  <span className="text-[10px] text-amber-900 block font-black">Falta Distribuir (Cota Férias)</span>
+                  <strong className="text-amber-950 font-mono text-xs sm:text-sm font-black">
+                    {formatCurrency(targetToRedistribute)}
                   </strong>
+                  <span className="text-[10px] text-amber-800 block font-mono font-bold">
+                    (+{shareToRedistribute.toFixed(1)}%)
+                  </span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Escolha do Destinatário da Cota */}
+          {/* Seletor de Estratégia de Distribuição */}
           <div className="space-y-3">
-            <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-              <Users className="w-4 h-4 text-indigo-600" />
-              Para quem você quer enviar essa diferença de cota?
+            <label className="text-xs font-bold text-slate-800 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-indigo-600" />
+                Como você deseja repartir o valor de {formatCurrency(targetToRedistribute)}?
+              </span>
             </label>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-              {/* Opção 1: Divisão Igualitária */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+              {/* Opção 1: Divisão Individual / Personalizada (Destaque Principal) */}
               <button
                 type="button"
-                onClick={() => setStrategy('equal')}
-                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between gap-2 cursor-pointer ${
-                  strategy === 'equal'
-                    ? 'bg-indigo-50/80 border-indigo-500 ring-2 ring-indigo-200'
+                onClick={() => setStrategy('custom')}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between gap-1.5 cursor-pointer ${
+                  strategy === 'custom'
+                    ? 'bg-indigo-50/90 border-indigo-500 ring-2 ring-indigo-200'
                     : 'bg-white border-slate-200 hover:border-slate-300'
                 }`}
               >
                 <div className="flex items-center gap-2">
-                  <RefreshCw className="w-4 h-4 text-indigo-600" />
-                  <span className="font-bold text-slate-900">Divisão Igual</span>
+                  <Sliders className="w-4 h-4 text-indigo-600" />
+                  <span className="font-bold text-slate-900">Divisão Individual</span>
                 </div>
-                <p className="text-[11px] text-slate-500 leading-tight">
-                  Reparte a sobra igualmente entre todas as {recipientSellers.length} vendedoras presentes.
+                <p className="text-[10px] text-slate-500 leading-tight">
+                  Escolha individualmente quanto passar para cada vendedora até dar o valor total.
                 </p>
               </button>
 
-              {/* Opção 2: Divisão Proporcional */}
-              <button
-                type="button"
-                onClick={() => setStrategy('proportional')}
-                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between gap-2 cursor-pointer ${
-                  strategy === 'proportional'
-                    ? 'bg-indigo-50/80 border-indigo-500 ring-2 ring-indigo-200'
-                    : 'bg-white border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-amber-500" />
-                  <span className="font-bold text-slate-900">Proporcional</span>
-                </div>
-                <p className="text-[11px] text-slate-500 leading-tight">
-                  Quem já tem cota maior absorve mais da diferença proporcionalmente.
-                </p>
-              </button>
-
-              {/* Opção 3: Vendedora Específica */}
+              {/* Opção 2: Vendedora Única */}
               <button
                 type="button"
                 onClick={() => setStrategy('single')}
-                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between gap-2 cursor-pointer ${
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between gap-1.5 cursor-pointer ${
                   strategy === 'single'
-                    ? 'bg-indigo-50/80 border-indigo-500 ring-2 ring-indigo-200'
+                    ? 'bg-indigo-50/90 border-indigo-500 ring-2 ring-indigo-200'
                     : 'bg-white border-slate-200 hover:border-slate-300'
                 }`}
               >
@@ -417,17 +514,279 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                   <span className="font-bold text-slate-900">Vendedora Única</span>
                 </div>
-                <p className="text-[11px] text-slate-500 leading-tight">
-                  Escolha exatamente uma vendedora para cobrir 100% da cota restante.
+                <p className="text-[10px] text-slate-500 leading-tight">
+                  Passa 100% do valor que falta para uma vendedora específica.
+                </p>
+              </button>
+
+              {/* Opção 3: Divisão Igual */}
+              <button
+                type="button"
+                onClick={() => setStrategy('equal')}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between gap-1.5 cursor-pointer ${
+                  strategy === 'equal'
+                    ? 'bg-indigo-50/90 border-indigo-500 ring-2 ring-indigo-200'
+                    : 'bg-white border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <RefreshCw className="w-4 h-4 text-indigo-600" />
+                  <span className="font-bold text-slate-900">Divisão Igual</span>
+                </div>
+                <p className="text-[10px] text-slate-500 leading-tight">
+                  Divide igualmente em partes idênticas entre as {recipientSellers.length} presentes.
+                </p>
+              </button>
+
+              {/* Opção 4: Proporcional */}
+              <button
+                type="button"
+                onClick={() => setStrategy('proportional')}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between gap-1.5 cursor-pointer ${
+                  strategy === 'proportional'
+                    ? 'bg-indigo-50/90 border-indigo-500 ring-2 ring-indigo-200'
+                    : 'bg-white border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  <span className="font-bold text-slate-900">Proporcional</span>
+                </div>
+                <p className="text-[10px] text-slate-500 leading-tight">
+                  Reparte proporcionalmente com base na meta atual de cada uma.
                 </p>
               </button>
             </div>
 
-            {/* Seletor de Vendedora Única */}
+            {/* PAINEL 1: DIVISÃO INDIVIDUAL PERSONALIZADA */}
+            {strategy === 'custom' && (
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 animate-in fade-in duration-150">
+                {/* Cabeçalho do Painel com Barra de Progresso e Ações */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-900">
+                        Atribuição Individual por Vendedora:
+                      </span>
+                      {isCustomAllocationComplete ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full border border-emerald-300">
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          Valor 100% atingido
+                        </span>
+                      ) : remainingTargetToAllocate > 0 ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-900 text-[10px] font-bold rounded-full border border-amber-300">
+                          Falta: {formatCurrency(remainingTargetToAllocate)}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-rose-100 text-rose-900 text-[10px] font-bold rounded-full border border-rose-300">
+                          Excesso: {formatCurrency(Math.abs(remainingTargetToAllocate))}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      Distribuído: <strong>{formatCurrency(totalCustomAllocatedTarget)}</strong> de{' '}
+                      <strong>{formatCurrency(targetToRedistribute)}</strong>
+                    </div>
+                  </div>
+
+                  {/* Controles de Unidade e Atalhos */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center bg-white border border-slate-300 rounded-xl p-0.5 text-[11px] font-bold shadow-2xs">
+                      <button
+                        type="button"
+                        onClick={() => setCustomUnit('currency')}
+                        className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
+                          customUnit === 'currency'
+                            ? 'bg-indigo-600 text-white shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        R$ Reais
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCustomUnit('percent')}
+                        className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
+                          customUnit === 'percent'
+                            ? 'bg-indigo-600 text-white shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        % Porcentagem
+                      </button>
+                    </div>
+
+                    {remainingTargetToAllocate > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleDistributeRemainingEqually}
+                        className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-[11px] font-bold transition cursor-pointer"
+                        title="Divide o valor restante igualmente entre as vendedoras"
+                      >
+                        Dividir Restante
+                      </button>
+                    )}
+
+                    {totalCustomAllocatedTarget > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearAllCustom}
+                        className="p-1 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-200/60 transition cursor-pointer"
+                        title="Limpar todos os valores adicionados"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Lista de Vendedoras com Inputs Individuais */}
+                <div className="space-y-2.5">
+                  {recipientSellers.map((seller) => {
+                    const currentAllocatedTarget = customAmountsAdd[seller.sellerId] || 0;
+                    const currentAllocatedShare =
+                      monthlyTarget > 0 ? Math.round((currentAllocatedTarget / monthlyTarget) * 1000) / 10 : 0;
+                    const newTotalTarget = seller.baseTarget + currentAllocatedTarget;
+                    const newTotalShare = Math.round((seller.baseShare + currentAllocatedShare) * 10) / 10;
+
+                    return (
+                      <div
+                        key={seller.sellerId}
+                        className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        {/* Identificação da Vendedora */}
+                        <div className="min-w-[170px]">
+                          <div className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
+                            <span>{seller.sellerName}</span>
+                            {seller.seniorityLevel && (
+                              <span className="text-[10px] font-normal text-slate-500 uppercase">
+                                ({seller.seniorityLevel})
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            Meta Atual: <span className="font-mono font-medium text-slate-700">{formatCurrency(seller.baseTarget)}</span> ({seller.baseShare.toFixed(1)}%)
+                          </div>
+                        </div>
+
+                        {/* Campo de Entrada Numérica (R$ ou %) */}
+                        <div className="flex items-center gap-2 flex-1 sm:justify-center">
+                          <div className="relative w-36 sm:w-40">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400 pointer-events-none">
+                              {customUnit === 'currency' ? 'R$' : '%'}
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              step={customUnit === 'currency' ? '100' : '0.1'}
+                              value={
+                                customUnit === 'currency'
+                                  ? currentAllocatedTarget > 0
+                                    ? currentAllocatedTarget
+                                    : ''
+                                  : currentAllocatedShare > 0
+                                  ? currentAllocatedShare
+                                  : ''
+                              }
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                if (customUnit === 'currency') {
+                                  handleSetSellerAmount(seller.sellerId, val);
+                                } else {
+                                  handleSetSellerShare(seller.sellerId, val);
+                                }
+                              }}
+                              placeholder="0"
+                              className="w-full pl-8 pr-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                            />
+                          </div>
+
+                          {/* Botões Rápidos */}
+                          {remainingTargetToAllocate > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleAllocateRemainingToSeller(seller.sellerId)}
+                              className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-lg text-[10px] font-bold transition cursor-pointer flex items-center gap-1 shrink-0"
+                              title="Adiciona o valor que ainda falta distribuir diretamente nesta vendedora"
+                            >
+                              <Plus className="w-3 h-3 text-amber-700" />
+                              <span>Restante</span>
+                            </button>
+                          )}
+
+                          {currentAllocatedTarget > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleResetSellerAmount(seller.sellerId)}
+                              className="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer"
+                              title="Zerar valor desta vendedora"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Nova Meta Calculada */}
+                        <div className="text-right min-w-[130px] font-mono text-xs">
+                          <div className="font-bold text-slate-900">
+                            {formatCurrency(newTotalTarget)}
+                          </div>
+                          <div className="text-[10px] flex items-center justify-end gap-1">
+                            <span className="font-bold text-indigo-700">({newTotalShare.toFixed(1)}%)</span>
+                            {currentAllocatedTarget > 0 && (
+                              <span className="text-emerald-700 font-bold">
+                                +{formatCurrency(currentAllocatedTarget)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Banner de Feedback da Distribuição Individual */}
+                <div className="pt-2">
+                  {isCustomAllocationComplete ? (
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-2 text-xs text-emerald-900 font-medium">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>
+                        Perfeito! O valor de <strong>{formatCurrency(targetToRedistribute)}</strong> foi 100% dividido entre as vendedoras. A meta da loja está completa.
+                      </span>
+                    </div>
+                  ) : remainingTargetToAllocate > 0 ? (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between gap-2 text-xs text-amber-950 font-medium">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>
+                          Ainda falta distribuir <strong>{formatCurrency(remainingTargetToAllocate)}</strong> ({remainingShareToAllocate.toFixed(1)}%) para atingir o valor total.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleDistributeRemainingEqually}
+                        className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-bold transition shrink-0 cursor-pointer"
+                      >
+                        Completar Automaticamente
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-xs text-rose-950 font-medium">
+                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>
+                        Atenção: Você distribuiu <strong>{formatCurrency(Math.abs(remainingTargetToAllocate))}</strong> a mais do que o valor que faltava. Diminua os valores acima para fechar a conta.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* PAINEL 2: SELETOR DE VENDEDORA ÚNICA */}
             {strategy === 'single' && (
-              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 animate-in fade-in duration-150">
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 animate-in fade-in duration-150">
                 <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <span>Selecione a vendedora que absorverá os +{shareToRedistribute.toFixed(1)}% ({formatCurrency(targetToRedistribute)}):</span>
+                  <span>Selecione a vendedora que absorverá integralmente os +{formatCurrency(targetToRedistribute)} (+{shareToRedistribute.toFixed(1)}%):</span>
                 </label>
                 <select
                   value={singleRecipientId}
@@ -436,7 +795,7 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
                 >
                   {recipientSellers.map((s) => (
                     <option key={s.sellerId} value={s.sellerId}>
-                      {s.sellerName} (Atual: {s.baseShare.toFixed(1)}% ➔ Nova: {(s.baseShare + shareToRedistribute).toFixed(1)}%)
+                      {s.sellerName} (Atual: {formatCurrency(s.baseTarget)} [{s.baseShare.toFixed(1)}%] ➔ Nova: {formatCurrency(s.baseTarget + targetToRedistribute)} [{(s.baseShare + shareToRedistribute).toFixed(1)}%])
                     </option>
                   ))}
                 </select>
@@ -449,14 +808,14 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                 <Sliders className="w-4 h-4 text-indigo-600" />
-                Simulação da Nova Distribuição da Equipe ({branchName}):
+                Simulação Geral da Equipe ({branchName}):
               </span>
               <span
-                className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-full ${
-                  isPreviewValid ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                className={`text-[11px] font-mono font-bold px-2.5 py-0.5 rounded-full ${
+                  isPreviewValid ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
                 }`}
               >
-                Soma: {totalPreviewPercentage.toFixed(1)}% {isPreviewValid ? '✓ 100%' : '⚠️ Não fecha 100%'}
+                Soma da Equipe: {totalPreviewPercentage.toFixed(1)}% {isPreviewValid ? '✓ 100%' : '(Ajustando)'}
               </span>
             </div>
 
@@ -542,28 +901,38 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
         </div>
 
         {/* Footer do Modal */}
-        <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 rounded-xl transition cursor-pointer"
-          >
-            Cancelar
-          </button>
+        <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="text-xs text-slate-500">
+            {strategy === 'custom' && !isCustomAllocationComplete && (
+              <span className="text-amber-700 font-medium">
+                ⚠️ Distribua o valor total ({formatCurrency(targetToRedistribute)}) para liberar a confirmação.
+              </span>
+            )}
+          </div>
 
-          <button
-            type="button"
-            onClick={handleConfirm}
-            disabled={!isPreviewValid || shareToRedistribute <= 0}
-            className={`px-5 py-2.5 text-xs font-bold rounded-xl transition shadow-md flex items-center gap-2 cursor-pointer ${
-              isPreviewValid && shareToRedistribute > 0
-                ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
-                : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-            }`}
-          >
-            <CheckCircle2 className="w-4 h-4" />
-            <span>Aplicar Redistribuição de Férias (100%)</span>
-          </button>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 rounded-xl transition cursor-pointer"
+            >
+              Cancelar
+            </button>
+
+            <button
+              type="button"
+              onClick={handleConfirm}
+              disabled={!isPreviewValid || shareToRedistribute <= 0}
+              className={`px-5 py-2.5 text-xs font-bold rounded-xl transition shadow-md flex items-center gap-2 cursor-pointer ${
+                isPreviewValid && shareToRedistribute > 0
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
+                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+              }`}
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Aplicar Redistribuição ({formatCurrency(targetToRedistribute)})</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

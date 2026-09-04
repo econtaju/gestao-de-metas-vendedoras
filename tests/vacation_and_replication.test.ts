@@ -295,4 +295,60 @@ describe('Férias Proporcionais nas Semanas, Replicação de Metas & Redistribui
     const finalSum = Math.round(Object.values(newShares).reduce((a, b) => a + b, 0) * 10) / 10;
     assert.equal(finalSum, 100, 'A soma final deve ser exatamente 100%');
   });
+
+  test('7. Cobertura de cota com divisão individual personalizada por vendedora até atingir o valor que falta', () => {
+    // Meta da Loja: R$ 200.000,00
+    // 4 vendedoras com 25% (R$ 50.000 cada)
+    const monthlyUnitTarget = 200000;
+    const initialShares = {
+      'seller-ana': 25,
+      'seller-bruna': 25,
+      'seller-carla': 25,
+      'seller-dani': 25,
+    };
+
+    // Ana tira 15 dias de férias (fator 0.5)
+    // Cota trabalhada da Ana: 12.5% (R$ 25.000)
+    // Valor que falta para cobrir a meta da loja: R$ 25.000 (12.5%)
+    const targetToRedistribute = 25000;
+    const shareToRedistribute = 12.5;
+
+    // Gestor escolhe individualmente quanto dividir:
+    // Bruna recebe R$ 15.000
+    // Carla recebe R$ 10.000
+    // Dani não recebe nada (R$ 0)
+    const customAmountsAdd = {
+      'seller-bruna': 15000,
+      'seller-carla': 10000,
+      'seller-dani': 0,
+    };
+
+    const totalAllocated = Object.values(customAmountsAdd).reduce((a, b) => a + b, 0);
+    const remainingToAllocate = targetToRedistribute - totalAllocated;
+
+    assert.equal(totalAllocated, 25000, 'Total alocado individualmente deve somar 25.000');
+    assert.equal(remainingToAllocate, 0, 'Não deve restar nada a alocar');
+
+    // Converte para novas participações da equipe
+    const newShares: Record<string, number> = {
+      'seller-ana': 12.5,
+      'seller-bruna': Math.round((initialShares['seller-bruna'] + (customAmountsAdd['seller-bruna'] / monthlyUnitTarget) * 100) * 10) / 10,
+      'seller-carla': Math.round((initialShares['seller-carla'] + (customAmountsAdd['seller-carla'] / monthlyUnitTarget) * 100) * 10) / 10,
+      'seller-dani': initialShares['seller-dani'],
+    };
+
+    assert.equal(newShares['seller-ana'], 12.5); // R$ 25.000
+    assert.equal(newShares['seller-bruna'], 32.5); // R$ 65.000 (25.000 + 15.000)
+    assert.equal(newShares['seller-carla'], 30.0); // R$ 60.000 (25.000 + 10.000)
+    assert.equal(newShares['seller-dani'], 25.0); // R$ 50.000
+
+    const sumShares = Math.round(Object.values(newShares).reduce((a, b) => a + b, 0) * 10) / 10;
+    assert.equal(sumShares, 100.0, 'Soma das porcentagens individuais deve ser 100.0%');
+
+    const totalCalculatedRevenue = Object.values(newShares).reduce(
+      (acc, s) => acc + Math.round(monthlyUnitTarget * (s / 100)),
+      0
+    );
+    assert.equal(totalCalculatedRevenue, 200000, 'Soma em R$ deve fechar exatamente os R$ 200.000 da unidade');
+  });
 });
