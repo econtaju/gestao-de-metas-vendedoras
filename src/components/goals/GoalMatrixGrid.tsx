@@ -16,6 +16,7 @@ import { CommercialWeekPeriod, TeamParticipationSummary, Company, Seller, GoalLe
 import { formatCurrency } from '../../services/financialEngine';
 import { getSellerIntervalAvailability } from '../../services/availabilityEngine';
 import { SellerGoalCardModal } from './SellerGoalCardModal';
+import { BatchTeamGoalPrintModal } from './BatchTeamGoalPrintModal';
 import { useApp } from '../../context/AppContext';
 
 interface GoalMatrixGridProps {
@@ -27,6 +28,7 @@ interface GoalMatrixGridProps {
   year: number;
   monthNumber?: number;
   activeLevels?: GoalLevel[];
+  vacationAdditions?: Record<string, number>;
   onOpenVacationRedistributionModal?: (sellerId?: string) => void;
 }
 
@@ -39,6 +41,7 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
   year = 2026,
   monthNumber = 9,
   activeLevels,
+  vacationAdditions,
   onOpenVacationRedistributionModal,
 }) => {
   const { activeCompany, companySellers, availabilities, workingDaysSettings } = useApp();
@@ -51,6 +54,8 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
     officialSharePercentage: number;
     seniorityLevel?: string;
   } | null>(null);
+
+  const [isBatchPrintModalOpen, setIsBatchPrintModalOpen] = useState<boolean>(false);
 
   // Totais consolidados da matriz: Meta Inicial, Distribuído Efetivo e Falta Distribuir (Férias)
   const matrixTotals = React.useMemo(() => {
@@ -127,7 +132,18 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {safeSellers.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setIsBatchPrintModalOpen(true)}
+              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+              title="Imprimir todos os relatórios individuais da equipe com quebra de página automática em 1 clique"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>Imprimir Relatórios da Equipe (Lote)</span>
+            </button>
+          )}
           <span className="text-xs font-mono font-semibold px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full border border-indigo-200">
             Unidade: {branchName}
           </span>
@@ -247,6 +263,7 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
                   const effectiveSellerMonthlyTarget = weekCalcs.reduce((acc, wc) => acc + wc.adjustedWeekTarget, 0);
                   const totalWorkedDaysInMonth = weekCalcs.reduce((acc, wc) => acc + wc.workedDays, 0);
                   const totalExpectedDaysInMonth = weekCalcs.reduce((acc, wc) => acc + wc.expectedDays, 0);
+                  const sellerVacationAdd = vacationAdditions?.[seller.sellerId] || 0;
 
                   return (
                     <tr key={seller.sellerId} className={idx % 2 === 0 ? 'bg-white hover:bg-slate-50' : 'bg-slate-50/50 hover:bg-slate-100/60'}>
@@ -258,6 +275,14 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
                           </span>
                           <span className="truncate">{seller.sellerName}</span>
                         </div>
+                        {sellerVacationAdd > 0 && (
+                          <div className="mt-1 flex items-center gap-1">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-bold" title="Acréscimo incorporado por cobertura de férias">
+                              <Sparkles className="w-2.5 h-2.5 text-emerald-600" />
+                              <span>+{formatCurrency(sellerVacationAdd)} (Cota Férias)</span>
+                            </span>
+                          </div>
+                        )}
                         {hasAbsences && (
                           <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold">
@@ -288,6 +313,11 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
                         <div className="text-slate-900 text-sm">
                           {formatCurrency(effectiveSellerMonthlyTarget)}
                         </div>
+                        {sellerVacationAdd > 0 && (
+                          <div className="text-[10px] text-emerald-700 font-semibold" title={`Meta base regular: ${formatCurrency(Math.max(0, effectiveSellerMonthlyTarget - sellerVacationAdd))}`}>
+                            +{formatCurrency(sellerVacationAdd)} férias
+                          </div>
+                        )}
                         {hasAbsences && (
                           <div className="text-[10px] text-slate-400 font-normal line-through">
                             Base: {formatCurrency(baseMonthlyTarget)}
@@ -532,10 +562,29 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
           weeks={safeWeeks}
           activeLevels={activeLevels}
           allSellers={safeSellers}
+          vacationAdditions={vacationAdditions}
           onSelectSeller={(sellerId) => {
             const found = safeSellers.find((s) => s.sellerId === sellerId);
             if (found) setSelectedSellerForReport(found);
           }}
+        />
+      )}
+
+      {/* Modal de Impressão em Lote dos Relatórios da Equipe (Melhoria 1) */}
+      {isBatchPrintModalOpen && (
+        <BatchTeamGoalPrintModal
+          isOpen={true}
+          onClose={() => setIsBatchPrintModalOpen(false)}
+          sellers={safeSellers}
+          monthlyTarget={monthlyTarget}
+          weeks={safeWeeks}
+          branchName={branchName}
+          monthName={monthName}
+          year={year}
+          monthNumber={monthNumber}
+          company={activeCompany}
+          activeLevels={activeLevels}
+          vacationAdditions={vacationAdditions}
         />
       )}
     </div>

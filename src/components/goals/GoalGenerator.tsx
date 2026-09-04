@@ -650,7 +650,10 @@ export const GoalGenerator: React.FC = () => {
   };
 
   // Função para salvar MasterGoal imediatamente com os dados mais recentes de participação
-  const buildAndSaveMasterGoal = (customShares?: Record<string, number>) => {
+  const buildAndSaveMasterGoal = (
+    customShares?: Record<string, number>,
+    vacationAdditions?: Record<string, number>
+  ) => {
     const monthNames = [
       'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
       'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
@@ -684,6 +687,7 @@ export const GoalGenerator: React.FC = () => {
       levelGrowthPercentages: levelGrowthRates,
       sellerShares: sharesToPersist,
       defaultSellerShares: activeCompany.defaultSellerShares || currentMaster?.defaultSellerShares,
+      vacationAdditions: vacationAdditions ?? currentMaster?.vacationAdditions,
       changeLogs: currentMaster?.changeLogs || changeLogs,
       updatedAt: new Date().toISOString(),
       publishedAt: currentMaster?.publishedAt,
@@ -872,14 +876,15 @@ export const GoalGenerator: React.FC = () => {
 
   const handleApplyVacationRedistribution = (
     newShares: Record<string, number>,
-    logDescription: string
+    logDescription: string,
+    vacationAdditions?: Record<string, number>
   ) => {
     Object.entries(newShares).forEach(([sellerId, share]) => {
       updateSellerShare(sellerId, share, 'adjusted');
     });
 
     // Salva imediatamente e de forma síncrona no MasterGoal e no armazenamento
-    buildAndSaveMasterGoal(newShares);
+    buildAndSaveMasterGoal(newShares, vacationAdditions);
 
     addAuditLog('update_shares', logDescription);
     setSaveSuccessMessage('Redistribuição de metas aplicada e salva com sucesso!');
@@ -1602,6 +1607,7 @@ export const GoalGenerator: React.FC = () => {
         year={selectedYear}
         monthNumber={selectedMonthNumber}
         activeLevels={calculatedLevels}
+        vacationAdditions={existingMaster?.vacationAdditions}
         onOpenVacationRedistributionModal={handleOpenVacationRedistributionModal}
       />
 

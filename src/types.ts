@@ -602,6 +602,8 @@ export interface MonthlyMasterGoal {
   levelGrowthPercentages?: number[];
   sellerShares?: Record<string, number>; // Participação de cada vendedor (%) configurada neste mês específico
   defaultSellerShares?: Record<string, number>; // Padrão pré-configurado da equipe
+  vacationAdditions?: Record<string, number>; // Valor em R$ adicionado a cada vendedora por cobertura/redistribuição de férias
+  vacationAdditionDescriptions?: Record<string, string>; // Detalhamento dos acréscimos (ex: cota cedida por quem)
   publishedAt?: string;
   updatedAt: string;
   changeLogs?: GoalChangeLog[];

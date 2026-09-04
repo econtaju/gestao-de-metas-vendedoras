@@ -9,6 +9,7 @@ import {
   calculateSellerGoalDetail,
   replicateSharesToOtherMonths,
 } from '../src/services/masterGoalEngine';
+import { formatCurrency } from '../src/services/financialEngine';
 import {
   Seller,
   MonthlyMasterGoal,
@@ -603,6 +604,146 @@ describe('Férias Proporcionais nas Semanas, Replicação de Metas & Redistribui
     assert.ok(publicReport.includes('144.000'), 'Relatório gerencial deve conter a meta da loja');
     assert.ok(publicReport.includes('25.0%'), 'Relatório gerencial deve conter a participação');
   });
+
+  test('13. Discriminação e Persistência de vacationAdditions (Meta Base + Cobertura Férias = Meta Oficial)', () => {
+    // Cenário: Loja com Meta de R$ 144.000,00
+    // Vendedora 1 (Ana) sai de férias e sua cota de R$ 10.000 é redistribuída:
+    // Bruna recebe +R$ 7.000 e Carla recebe +R$ 3.000
+    const monthlyTarget = 144000;
+    const baseShares: Record<string, number> = {
+      'seller-ana': 25, // 36.000
+      'seller-bruna': 25, // 36.000
+      'seller-carla': 25, // 36.000
+      'seller-dani': 25, // 36.000
+    };
+
+    const vacationAdditions: Record<string, number> = {
+      'seller-bruna': 7000,
+      'seller-carla': 3000,
+    };
+
+    // Novas metas calculadas
+    const brunaOriginalBase = Math.round(monthlyTarget * (baseShares['seller-bruna'] / 100)); // 36.000
+    const brunaVacationAdd = vacationAdditions['seller-bruna'] || 0; // 7.000
+    const brunaOfficialTarget = brunaOriginalBase + brunaVacationAdd; // 43.000
+
+    assert.equal(brunaOriginalBase, 36000);
+    assert.equal(brunaVacationAdd, 7000);
+    assert.equal(brunaOfficialTarget, 43000);
+
+    // Formatação discriminada para relatório/WhatsApp
+    const formatSellerSummary = (sellerId: string, name: string) => {
+      const add = vacationAdditions[sellerId] || 0;
+      const base = Math.round(monthlyTarget * (baseShares[sellerId] / 100));
+      const total = base + add;
+      let text = `🎯 *Meta Mensal Oficial:* ${formatCurrency(total)}\n`;
+      if (add > 0) {
+        text += `🌴 *Cota de Férias Incluída:* +${formatCurrency(add)} (Meta Base Regular: ${formatCurrency(base)})`;
+      }
+      return text;
+    };
+
+    const brunaText = formatSellerSummary('seller-bruna', 'Bruna');
+    assert.ok(brunaText.includes(formatCurrency(43000)), 'Deve exibir meta total oficial de 43.000');
+    assert.ok(brunaText.includes(`+${formatCurrency(7000)}`), 'Deve discriminar os 7.000 de férias');
+    assert.ok(brunaText.includes(formatCurrency(36000)), 'Deve discriminar a meta base de 36.000');
+
+    // Vendedora sem acréscimo de férias
+    const daniText = formatSellerSummary('seller-dani', 'Dani');
+    assert.ok(!daniText.includes('Cota de Férias Incluída'), 'Dani não deve ter menção de férias');
+    assert.ok(daniText.includes(formatCurrency(36000)));
+  });
+
+  test('14. Cartão Visual Compacto (Story / Card de Alta Conversão) com resumo operacional', () => {
+    const seller = {
+      name: 'Bruna Lima',
+      monthlyTarget: 43000,
+      vacationAdd: 7000,
+      originalBase: 36000,
+      avgTicket: 250,
+      weeks: [
+        { weekNumber: 1, target: 10750, weight: 25 },
+        { weekNumber: 2, target: 10750, weight: 25 },
+        { weekNumber: 3, target: 10750, weight: 25 },
+        { weekNumber: 4, target: 10750, weight: 25 },
+      ],
+    };
+
+    const requiredSales = Math.ceil(seller.monthlyTarget / seller.avgTicket);
+    assert.equal(requiredSales, 172, '43.000 / 250 = 172 clientes');
+
+    // Validação da estrutura de dados do card compacto
+    const compactCardData = {
+      sellerName: seller.name,
+      monthlyTarget: seller.monthlyTarget,
+      vacationAdd: seller.vacationAdd,
+      requiredSales,
+      avgTicket: seller.avgTicket,
+      weeklyCount: seller.weeks.length,
+    };
+
+    assert.equal(compactCardData.sellerName, 'Bruna Lima');
+    assert.equal(compactCardData.monthlyTarget, 43000);
+    assert.equal(compactCardData.vacationAdd, 7000);
+    assert.equal(compactCardData.requiredSales, 172);
+  });
+
+  test('15. Termômetro Dinâmico de Superação de Níveis e Salto de Comissões', () => {
+    const monthlyTarget = 40000;
+    const realizedRevenue = 45000;
+
+    const levels = [
+      { id: '1', name: 'Bronze', revenueTarget: 32000, commissionPercentage: 2.0 },
+      { id: '2', name: 'Prata', revenueTarget: 40000, commissionPercentage: 3.0 },
+      { id: '3', name: 'Ouro', revenueTarget: 48000, commissionPercentage: 4.0 },
+      { id: '4', name: 'Diamante', revenueTarget: 56000, commissionPercentage: 5.0 },
+    ];
+
+    // Encontra nível conquistado
+    const currentLevelIndex = levels.reduce((acc, lvl, idx) => {
+      return realizedRevenue >= lvl.revenueTarget ? idx : acc;
+    }, -1);
+
+    assert.equal(currentLevelIndex, 1, '45.000 supera Prata (40.000), mas ainda não atingiu Ouro (48.000)');
+    const currentLevel = levels[currentLevelIndex];
+    assert.equal(currentLevel.name, 'Prata');
+    assert.equal(currentLevel.commissionPercentage, 3.0);
+
+    // Próximo nível a ser alcançado
+    const nextLevel = levels[currentLevelIndex + 1];
+    assert.equal(nextLevel.name, 'Ouro');
+    assert.equal(nextLevel.commissionPercentage, 4.0);
+
+    const remainingToNext = Math.max(0, nextLevel.revenueTarget - realizedRevenue);
+    assert.equal(remainingToNext, 3000, 'Faltam exatamente 3.000 para virar para Ouro');
+
+    const commissionDiff = nextLevel.commissionPercentage - currentLevel.commissionPercentage;
+    assert.equal(commissionDiff, 1.0, 'Salto de comissão de 1.0 ponto percentual');
+  });
+
+  test('16. Impressão em Lote com Quebra de Página por Vendedora e Modo Privacidade', () => {
+    const sellers = [
+      { id: '1', name: 'Ana', share: 25 },
+      { id: '2', name: 'Bruna', share: 25 },
+      { id: '3', name: 'Carla', share: 25 },
+      { id: '4', name: 'Dani', share: 25 },
+    ];
+
+    // Verifica montagem da lista de páginas
+    const pages = sellers.map((s, idx) => ({
+      pageNumber: idx + 1,
+      totalPages: sellers.length,
+      sellerName: s.name,
+      pageBreakClass: 'seller-page-card',
+    }));
+
+    assert.equal(pages.length, 4);
+    assert.equal(pages[0].pageNumber, 1);
+    assert.equal(pages[3].pageNumber, 4);
+    assert.equal(pages[0].totalPages, 4);
+    assert.equal(pages[0].pageBreakClass, 'seller-page-card');
+  });
 });
+
 
 

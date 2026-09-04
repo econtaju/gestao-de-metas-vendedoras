@@ -17,7 +17,7 @@ import {
   Printer,
   FileCheck,
 } from 'lucide-react';
-import { Seller, SellerGoalDetail } from '../../types';
+import { Seller, SellerGoalDetail, GoalLevel } from '../../types';
 import { formatCurrency, formatPercent } from '../../services/financialEngine';
 import { SellerGoalCardModal } from '../goals/SellerGoalCardModal';
 import { useApp } from '../../context/AppContext';
@@ -61,6 +61,43 @@ export const SellerMasterGoalTracker: React.FC<SellerMasterGoalTrackerProps> = (
   const simulatedTotalRev = realizedRevenue + extraRevenue;
   const simulatedAchievement =
     monthlyTarget > 0 ? (simulatedTotalRev / monthlyTarget) * 100 : 0;
+
+  // Termômetro Dinâmico de Níveis da Vendedora (Melhoria 3)
+  const sellerLevels = React.useMemo(() => {
+    const companyLevels = activeCompany?.levels || [];
+    if (!companyLevels.length) {
+      return [
+        { id: '1', name: 'Bronze', revenueTarget: Math.round(monthlyTarget * 0.8), commissionPercentage: 2.0 },
+        { id: '2', name: 'Prata (Meta)', revenueTarget: Math.round(monthlyTarget), commissionPercentage: 3.0 },
+        { id: '3', name: 'Ouro', revenueTarget: Math.round(monthlyTarget * 1.2), commissionPercentage: 4.0 },
+        { id: '4', name: 'Diamante', revenueTarget: Math.round(monthlyTarget * 1.4), commissionPercentage: 5.0 },
+      ];
+    }
+    const baseLvl1 = companyLevels[0]?.revenueTarget || 1;
+    return companyLevels.map((lvl, idx) => {
+      const ratio = baseLvl1 > 0 ? lvl.revenueTarget / baseLvl1 : 1;
+      const target = Math.round(
+        monthlyTarget * (idx === 0 ? 1 : (ratio > 0 ? ratio : (1 + idx * 0.15)))
+      );
+      return {
+        ...lvl,
+        revenueTarget: target,
+      };
+    });
+  }, [activeCompany?.levels, monthlyTarget]);
+
+  const currentLevelIndex = sellerLevels.reduce((acc, lvl, idx) => {
+    return realizedRevenue >= lvl.revenueTarget ? idx : acc;
+  }, -1);
+
+  const currentLevel = currentLevelIndex >= 0 ? sellerLevels[currentLevelIndex] : null;
+  const nextLevel = currentLevelIndex + 1 < sellerLevels.length ? sellerLevels[currentLevelIndex + 1] : null;
+  const remainingToNextLevel = nextLevel ? Math.max(0, nextLevel.revenueTarget - realizedRevenue) : 0;
+  const pctToNextLevel = nextLevel && nextLevel.revenueTarget > 0
+    ? Math.min(100, Math.max(0, (realizedRevenue / nextLevel.revenueTarget) * 100))
+    : 100;
+  const highestLevelTarget = sellerLevels.length > 0 ? sellerLevels[sellerLevels.length - 1].revenueTarget : monthlyTarget;
+  const globalLadderPct = highestLevelTarget > 0 ? Math.min(100, (realizedRevenue / highestLevelTarget) * 100) : 0;
 
   return (
     <div className="space-y-6">
@@ -145,7 +182,138 @@ export const SellerMasterGoalTracker: React.FC<SellerMasterGoalTrackerProps> = (
         </div>
       </div>
 
-      {/* 2. Semanas Comerciais da Vendedora */}
+      {/* 2. Termômetro Dinâmico de Superação de Níveis & Comissões (Melhoria 3) */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden p-5 sm:p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4 border-slate-100">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-amber-100 text-amber-700 rounded-xl">
+              <Award className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <span>Termômetro Dinâmico de Superação de Níveis</span>
+                {currentLevel && (
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-extrabold border border-emerald-300">
+                    🏆 {currentLevel.name} Conquistado!
+                  </span>
+                )}
+              </h4>
+              <p className="text-xs text-slate-500">
+                Acompanhe em tempo real o salto na sua comissão a cada nível superado
+              </p>
+            </div>
+          </div>
+
+          {nextLevel ? (
+            <div className="bg-amber-50 border border-amber-200 px-3.5 py-1.5 rounded-xl text-right shrink-0">
+              <span className="text-[10px] uppercase font-bold text-amber-800 block">
+                Próximo Alvo: {nextLevel.name}
+              </span>
+              <span className="text-xs font-mono font-extrabold text-amber-950">
+                Faltam {formatCurrency(remainingToNextLevel)}
+              </span>
+            </div>
+          ) : (
+            <div className="bg-emerald-50 border border-emerald-300 px-3.5 py-1.5 rounded-xl text-right shrink-0">
+              <span className="text-[10px] uppercase font-bold text-emerald-800 block">
+                Topo da Escada!
+              </span>
+              <span className="text-xs font-mono font-extrabold text-emerald-950">
+                🎉 Todos os níveis atingidos!
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Régua de Níveis */}
+        <div className="space-y-2 pt-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            {sellerLevels.map((lvl, lIdx) => {
+              const isPassed = realizedRevenue >= lvl.revenueTarget;
+              const isNext = nextLevel && nextLevel.id === lvl.id;
+
+              return (
+                <div
+                  key={lvl.id || lIdx}
+                  className={`p-3 rounded-xl border transition-all ${
+                    isPassed
+                      ? 'bg-emerald-50/80 border-emerald-300 shadow-2xs'
+                      : isNext
+                      ? 'bg-amber-50/70 border-amber-300 ring-2 ring-amber-400/30'
+                      : 'bg-slate-50/70 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1">
+                      {isPassed ? '✅' : isNext ? '🎯' : '⚪'} {lvl.name}
+                    </span>
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                        isPassed
+                          ? 'bg-emerald-200/80 text-emerald-900'
+                          : isNext
+                          ? 'bg-amber-200 text-amber-950'
+                          : 'bg-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {lvl.commissionPercentage}% comissão
+                    </span>
+                  </div>
+
+                  <div className="text-xs font-mono font-extrabold text-slate-900 mt-1">
+                    {formatCurrency(lvl.revenueTarget)}
+                  </div>
+
+                  <div className="mt-1.5 text-[10px] font-medium">
+                    {isPassed ? (
+                      <span className="text-emerald-700 font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Superado!
+                      </span>
+                    ) : isNext ? (
+                      <span className="text-amber-800 font-bold">
+                        {pctToNextLevel.toFixed(0)}% concluído (falta {formatCurrency(remainingToNextLevel)})
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">Atingimento futuro</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Barra Global de Superação */}
+          <div className="pt-2">
+            <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
+              <span>Progresso na Escada de Premiação:</span>
+              <span className="font-mono font-bold text-indigo-700">{globalLadderPct.toFixed(1)}% do nível máximo</span>
+            </div>
+            <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden p-0.5 border border-slate-200">
+              <div
+                className="h-full bg-gradient-to-r from-indigo-500 via-amber-400 to-emerald-500 rounded-full transition-all duration-500"
+                style={{ width: `${globalLadderPct}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Card Motivacional de Salto de Comissão */}
+        {nextLevel && (
+          <div className="p-3 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl flex items-center justify-between text-xs text-amber-950">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                Faltam apenas <strong>{formatCurrency(remainingToNextLevel)}</strong> para atingir o nível <strong>{nextLevel.name}</strong> e elevar sua taxa de comissão para <strong>{nextLevel.commissionPercentage}%</strong>!
+              </span>
+            </div>
+            <span className="font-mono font-extrabold text-amber-800 text-[11px] shrink-0 bg-white/80 px-2 py-0.5 rounded-lg border border-amber-300">
+              +{((nextLevel.commissionPercentage || 0) - (currentLevel?.commissionPercentage || 0)).toFixed(1)}% p.p.
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* 3. Semanas Comerciais da Vendedora */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -354,6 +522,7 @@ export const SellerMasterGoalTracker: React.FC<SellerMasterGoalTrackerProps> = (
             weightPercentage: w.weightPercentage || 0,
             revenueTarget: w.targetAmount ?? w.revenueTarget ?? 0,
           }))}
+          activeLevels={sellerLevels}
         />
       )}
     </div>

@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { Seller, SellerAvailability, WorkingDaysSettings, CommercialWeekPeriod } from '../../types';
 import { formatCurrency, formatPercent } from '../../services/financialEngine';
-import { getSellerIntervalAvailability } from '../../services/availabilityEngine';
+import { getSellerIntervalAvailability, DEFAULT_WORKING_DAYS_SETTINGS } from '../../services/availabilityEngine';
 
 interface VacationShareRedistributionModalProps {
   isOpen: boolean;
@@ -40,7 +40,11 @@ interface VacationShareRedistributionModalProps {
   workingDaysSettings: WorkingDaysSettings;
   weeks: CommercialWeekPeriod[];
   initialSellerId?: string;
-  onApplyNewShares: (newShares: Record<string, number>, logDescription: string) => void;
+  onApplyNewShares: (
+    newShares: Record<string, number>,
+    logDescription: string,
+    vacationAdditions?: Record<string, number>
+  ) => void;
 }
 
 type RedistributionStrategy = 'custom' | 'single' | 'equal' | 'proportional';
@@ -60,7 +64,8 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
   initialSellerId,
   onApplyNewShares,
 }) => {
-  // 1. Diagnóstico de cada vendedora no mês
+  // 1. Diagnóstico de cada vendedora no mês com fallback seguro de calendário
+  const safeWorkingDays = workingDaysSettings || DEFAULT_WORKING_DAYS_SETTINGS;
   const mStr = String(monthNumber).padStart(2, '0');
   const lastDay = new Date(year, monthNumber, 0).getDate();
   const monthStart = `${year}-${mStr}-01`;
@@ -73,7 +78,7 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
         monthStart,
         monthEnd,
         availabilities,
-        workingDaysSettings
+        safeWorkingDays
       );
 
       const baseShare = s.officialSharePercentage ?? (100 / Math.max(1, sellers.length));
@@ -99,7 +104,7 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
         uncoveredTarget,
       };
     });
-  }, [sellers, monthStart, monthEnd, availabilities, workingDaysSettings, monthlyTarget]);
+  }, [sellers, monthStart, monthEnd, availabilities, safeWorkingDays, monthlyTarget]);
 
   // Lista de vendedoras que estão de férias neste mês
   const absentSellers = useMemo(
@@ -122,6 +127,10 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
   // Alocações manuais individuais em R$ (sellerId -> valor adicional em R$)
   const [customAmountsAdd, setCustomAmountsAdd] = useState<Record<string, number>>({});
 
+  // Inputs em formato texto para digitação fluida, permitindo apagar, digitar vírgula e decimais sem conflito
+  const [rawTargetInput, setRawTargetInput] = useState<string>('');
+  const [rawSellerInputs, setRawSellerInputs] = useState<Record<string, string>>({});
+
   // Valor editável de cota a transferir (permite definir livremente quanto repartir)
   const [customAmountToRedistribute, setCustomAmountToRedistribute] = useState<number | null>(null);
 
@@ -133,16 +142,25 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
     if (isOpen) {
       setStrategy('custom');
       setCustomAmountsAdd({});
+      setRawSellerInputs({});
       setCustomAmountToRedistribute(null);
       setIsSuccessScreen(false);
 
+      let initialAbsentId = '';
       if (initialSellerId && sellersWithAvail.some((s) => s.sellerId === initialSellerId)) {
-        setSelectedAbsentSellerId(initialSellerId);
+        initialAbsentId = initialSellerId;
       } else if (absentSellers.length > 0) {
-        setSelectedAbsentSellerId(absentSellers[0].sellerId);
+        initialAbsentId = absentSellers[0].sellerId;
       } else if (sellersWithAvail.length > 0) {
-        setSelectedAbsentSellerId(sellersWithAvail[0].sellerId);
+        initialAbsentId = sellersWithAvail[0].sellerId;
       }
+      setSelectedAbsentSellerId(initialAbsentId);
+
+      const chosenSeller = sellersWithAvail.find((s) => s.sellerId === initialAbsentId);
+      const defaultTarget = chosenSeller?.uncoveredTarget && chosenSeller.uncoveredTarget > 0
+        ? chosenSeller.uncoveredTarget
+        : Math.round((chosenSeller?.baseTarget || 0) * 0.5);
+      setRawTargetInput(defaultTarget > 0 ? String(defaultTarget) : '');
     }
   }, [isOpen, initialSellerId, absentSellers.length, sellersWithAvail.length]);
 
@@ -196,37 +214,76 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
   const remainingShareToAllocate = Math.round((shareToRedistribute - totalCustomAllocatedShare) * 10) / 10;
 
   const isCustomAllocationComplete =
-    Math.abs(remainingTargetToAllocate) <= 2 || Math.abs(remainingShareToAllocate) <= 0.05;
+    Math.abs(remainingTargetToAllocate) <= 10 || Math.abs(remainingShareToAllocate) <= 0.1;
 
-  // Handlers para edição individual de cada vendedora
-  const handleSetSellerAmount = (sellerId: string, amount: number) => {
-    const safeAmount = Math.max(0, Math.round(amount));
-    setCustomAmountsAdd((prev) => ({
-      ...prev,
-      [sellerId]: safeAmount,
-    }));
+  // Handlers para digitação e edição individual com suporte a números e textos livres
+  const handleSellerInputChange = (sellerId: string, textVal: string) => {
+    const normalized = textVal.replace(',', '.');
+    setRawSellerInputs((prev) => ({ ...prev, [sellerId]: textVal }));
+
+    const parsed = parseFloat(normalized);
+    if (isNaN(parsed) || parsed <= 0) {
+      setCustomAmountsAdd((prev) => {
+        const next = { ...prev };
+        delete next[sellerId];
+        return next;
+      });
+      return;
+    }
+
+    if (customUnit === 'currency') {
+      const safeAmount = Math.max(0, Math.round(parsed));
+      setCustomAmountsAdd((prev) => ({
+        ...prev,
+        [sellerId]: safeAmount,
+      }));
+    } else {
+      const safePercent = Math.max(0, parsed);
+      const calculatedTarget = Math.round(monthlyTarget * (safePercent / 100));
+      setCustomAmountsAdd((prev) => ({
+        ...prev,
+        [sellerId]: calculatedTarget,
+      }));
+    }
   };
 
-  const handleSetSellerShare = (sellerId: string, percentVal: number) => {
-    const safePercent = Math.max(0, percentVal);
-    const calculatedTarget = Math.round(monthlyTarget * (safePercent / 100));
-    setCustomAmountsAdd((prev) => ({
-      ...prev,
-      [sellerId]: calculatedTarget,
-    }));
+  const handleToggleUnit = (unit: 'currency' | 'percent') => {
+    setCustomUnit(unit);
+    const newRaw: Record<string, string> = {};
+    Object.entries(customAmountsAdd).forEach(([sid, amt]) => {
+      if (unit === 'currency') {
+        newRaw[sid] = String(amt);
+      } else {
+        const pct = monthlyTarget > 0 ? Math.round((amt / monthlyTarget) * 1000) / 10 : 0;
+        newRaw[sid] = String(pct);
+      }
+    });
+    setRawSellerInputs(newRaw);
   };
 
   const handleAllocateRemainingToSeller = (sellerId: string) => {
     const current = customAmountsAdd[sellerId] || 0;
     const canAdd = Math.max(0, remainingTargetToAllocate);
+    const newTotal = current + canAdd;
     setCustomAmountsAdd((prev) => ({
       ...prev,
-      [sellerId]: current + canAdd,
+      [sellerId]: newTotal,
+    }));
+    setRawSellerInputs((prev) => ({
+      ...prev,
+      [sellerId]: customUnit === 'currency'
+        ? String(newTotal)
+        : String(monthlyTarget > 0 ? Math.round((newTotal / monthlyTarget) * 1000) / 10 : 0),
     }));
   };
 
   const handleResetSellerAmount = (sellerId: string) => {
     setCustomAmountsAdd((prev) => {
+      const next = { ...prev };
+      delete next[sellerId];
+      return next;
+    });
+    setRawSellerInputs((prev) => {
       const next = { ...prev };
       delete next[sellerId];
       return next;
@@ -250,55 +307,71 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
       });
       return updated;
     });
+
+    setRawSellerInputs({});
+  };
+
+  const handleAutoBalanceAndComplete = () => {
+    if (recipientSellers.length === 0) return;
+    if (remainingTargetToAllocate > 0) {
+      handleDistributeRemainingEqually();
+    } else if (remainingTargetToAllocate < 0) {
+      // Ajusta o valor a redistribuir para coincidir exatamente com a soma distribuída
+      setCustomAmountToRedistribute(totalCustomAllocatedTarget);
+      setRawTargetInput(String(totalCustomAllocatedTarget));
+    }
   };
 
   const handleClearAllCustom = () => {
     setCustomAmountsAdd({});
+    setRawSellerInputs({});
   };
 
-  // 2. Cálculo da nova distribuição simulada
+  // 2. Cálculo da nova distribuição simulada com auto-fechamento perfeito em 100%
   const previewShares = useMemo(() => {
     if (!activeAbsentSeller) return {};
 
     const result: Record<string, number> = {};
 
-    // A vendedora ausente fica com sua cota base deduzida do valor redistribuído
-    if (customAmountToRedistribute === null && activeAbsentSeller?.hasVacation) {
-      result[activeAbsentSeller.sellerId] = activeAbsentSeller.effectiveShare;
-    } else {
-      const absentNewTarget = Math.max(0, (activeAbsentSeller.baseTarget || 0) - targetToRedistribute);
-      const absentNewShare = monthlyTarget > 0 ? Math.round((absentNewTarget / monthlyTarget) * 1000) / 10 : 0;
-      result[activeAbsentSeller.sellerId] = absentNewShare;
-    }
-
-    if (recipientSellers.length === 0 || targetToRedistribute <= 0) {
+    if (recipientSellers.length === 0) {
       sellersWithAvail.forEach((s) => {
-        if (s.sellerId !== activeAbsentSeller.sellerId) {
-          result[s.sellerId] = s.baseShare;
-        }
+        result[s.sellerId] = s.baseShare;
       });
       return result;
     }
 
     if (strategy === 'custom') {
-      // Divisão individual por vendedora
+      // No modo individual, a vendedora de origem cede exatamente o que foi alocado para as outras
+      const actualTransferred = Math.min(
+        activeAbsentSeller.baseTarget || 0,
+        totalCustomAllocatedTarget > 0 ? totalCustomAllocatedTarget : targetToRedistribute
+      );
+      const absentNewTarget = Math.max(0, (activeAbsentSeller.baseTarget || 0) - actualTransferred);
+      const absentNewShare = monthlyTarget > 0 ? Math.round((absentNewTarget / monthlyTarget) * 1000) / 10 : 0;
+      result[activeAbsentSeller.sellerId] = absentNewShare;
+
       recipientSellers.forEach((s) => {
         const addedTarget = customAmountsAdd[s.sellerId] || 0;
         const addedShare = monthlyTarget > 0 ? (addedTarget / monthlyTarget) * 100 : 0;
         result[s.sellerId] = Math.round((s.baseShare + addedShare) * 10) / 10;
       });
 
-      // Se a alocação estiver completa, garante fechamento estrito em 100%
-      if (isCustomAllocationComplete) {
-        const currentSum = Object.values(result).reduce((acc, v) => acc + v, 0);
-        const diff = Math.round((100 - currentSum) * 10) / 10;
-        if (diff !== 0 && recipientSellers.length > 0) {
-          const firstEdited = recipientSellers.find((s) => (customAmountsAdd[s.sellerId] || 0) > 0) || recipientSellers[0];
-          result[firstEdited.sellerId] = Math.round((result[firstEdited.sellerId] + diff) * 10) / 10;
+      // Se todas as cotas foram definidas, garante fechamento estrito em 100.0%
+      const currentSum = Object.values(result).reduce((acc, v) => acc + v, 0);
+      const diff = Math.round((100 - currentSum) * 10) / 10;
+      if (diff !== 0 && recipientSellers.length > 0) {
+        const targetAdjustId =
+          recipientSellers.find((s) => (customAmountsAdd[s.sellerId] || 0) > 0)?.sellerId ||
+          recipientSellers[0].sellerId;
+        if (result[targetAdjustId] !== undefined) {
+          result[targetAdjustId] = Math.max(0, Math.round((result[targetAdjustId] + diff) * 10) / 10);
         }
       }
     } else if (strategy === 'single') {
-      // 100% da sobra vai para a vendedora única selecionada
+      const absentNewTarget = Math.max(0, (activeAbsentSeller.baseTarget || 0) - targetToRedistribute);
+      const absentNewShare = monthlyTarget > 0 ? Math.round((absentNewTarget / monthlyTarget) * 1000) / 10 : 0;
+      result[activeAbsentSeller.sellerId] = absentNewShare;
+
       recipientSellers.forEach((s) => {
         if (s.sellerId === singleRecipientId) {
           result[s.sellerId] = Math.round((s.baseShare + shareToRedistribute) * 10) / 10;
@@ -306,27 +379,37 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
           result[s.sellerId] = s.baseShare;
         }
       });
+      // Fechamento de resíduo
+      const currentSum = Object.values(result).reduce((acc, v) => acc + v, 0);
+      const diff = Math.round((100 - currentSum) * 10) / 10;
+      if (diff !== 0 && singleRecipientId) {
+        result[singleRecipientId] = Math.round((result[singleRecipientId] + diff) * 10) / 10;
+      }
     } else if (strategy === 'equal') {
-      // Divisão igualitária entre todas as presentes
+      const absentNewTarget = Math.max(0, (activeAbsentSeller.baseTarget || 0) - targetToRedistribute);
+      const absentNewShare = monthlyTarget > 0 ? Math.round((absentNewTarget / monthlyTarget) * 1000) / 10 : 0;
+      result[activeAbsentSeller.sellerId] = absentNewShare;
+
       const extraPerSeller = Math.round((shareToRedistribute / recipientSellers.length) * 10) / 10;
       recipientSellers.forEach((s) => {
         result[s.sellerId] = Math.round((s.baseShare + extraPerSeller) * 10) / 10;
       });
-      // Ajuste de resíduo
       const currentSum = Object.values(result).reduce((acc, v) => acc + v, 0);
       const diff = Math.round((100 - currentSum) * 10) / 10;
       if (diff !== 0 && recipientSellers.length > 0) {
         result[recipientSellers[0].sellerId] = Math.round((result[recipientSellers[0].sellerId] + diff) * 10) / 10;
       }
     } else if (strategy === 'proportional') {
-      // Divisão proporcional à participação atual das presentes
+      const absentNewTarget = Math.max(0, (activeAbsentSeller.baseTarget || 0) - targetToRedistribute);
+      const absentNewShare = monthlyTarget > 0 ? Math.round((absentNewTarget / monthlyTarget) * 1000) / 10 : 0;
+      result[activeAbsentSeller.sellerId] = absentNewShare;
+
       const totalPresentBase = recipientSellers.reduce((sum, s) => sum + s.baseShare, 0);
       recipientSellers.forEach((s) => {
         const ratio = totalPresentBase > 0 ? s.baseShare / totalPresentBase : 1 / recipientSellers.length;
         const extra = Math.round(shareToRedistribute * ratio * 10) / 10;
         result[s.sellerId] = Math.round((s.baseShare + extra) * 10) / 10;
       });
-      // Ajuste de resíduo
       const currentSum = Object.values(result).reduce((acc, v) => acc + v, 0);
       const diff = Math.round((100 - currentSum) * 10) / 10;
       if (diff !== 0 && recipientSellers.length > 0) {
@@ -343,24 +426,57 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
     strategy,
     singleRecipientId,
     customAmountsAdd,
-    isCustomAllocationComplete,
     monthlyTarget,
     sellersWithAvail,
-    customAmountToRedistribute,
+    totalCustomAllocatedTarget,
   ]);
 
   const totalPreviewPercentage = useMemo(() => {
     return Math.round(Object.values(previewShares).reduce((acc, v) => acc + v, 0) * 10) / 10;
   }, [previewShares]);
 
-  const isPreviewValid =
-    strategy === 'custom'
-      ? isCustomAllocationComplete && Math.abs(100 - totalPreviewPercentage) < 0.2
-      : Math.abs(100 - totalPreviewPercentage) < 0.1;
+  const isPreviewValid = useMemo(() => {
+    if (strategy === 'custom') {
+      return totalCustomAllocatedTarget > 0;
+    }
+    if (strategy === 'single') {
+      return !!singleRecipientId && targetToRedistribute > 0;
+    }
+    return targetToRedistribute > 0 && recipientSellers.length > 0;
+  }, [strategy, totalCustomAllocatedTarget, singleRecipientId, targetToRedistribute, recipientSellers.length]);
 
-  // Executa a confirmação e aplica as novas porcentagens
+  // Executa a confirmação, calcula os acréscimos por vendedora e salva imediatamente
   const handleConfirm = () => {
-    if (!isPreviewValid) return;
+    if (!activeAbsentSeller || !isPreviewValid) return;
+
+    // Garante que a soma das porcentagens feche rigorosamente em 100.0%
+    const finalShares = { ...previewShares };
+    const currentSum = Math.round(Object.values(finalShares).reduce((a, b) => a + b, 0) * 10) / 10;
+    const residualDiff = Math.round((100 - currentSum) * 10) / 10;
+    if (residualDiff !== 0 && recipientSellers.length > 0) {
+      const adjustId =
+        recipientSellers.find((s) => (customAmountsAdd[s.sellerId] || 0) > 0)?.sellerId ||
+        recipientSellers[0].sellerId;
+      finalShares[adjustId] = Math.max(0, Math.round((finalShares[adjustId] + residualDiff) * 10) / 10);
+    }
+
+    // Calcula os acréscimos em R$ que cada vendedora recebeu a mais devido às férias
+    const vacationAdditions: Record<string, number> = {};
+    recipientSellers.forEach((s) => {
+      let added = 0;
+      if (strategy === 'custom') {
+        added = customAmountsAdd[s.sellerId] || 0;
+      } else if (strategy === 'single') {
+        if (s.sellerId === singleRecipientId) added = targetToRedistribute;
+      } else {
+        const newShare = finalShares[s.sellerId] ?? s.baseShare;
+        const newTarget = Math.round(monthlyTarget * (newShare / 100));
+        added = Math.max(0, newTarget - s.baseTarget);
+      }
+      if (added > 0) {
+        vacationAdditions[s.sellerId] = added;
+      }
+    });
 
     let desc = '';
     if (strategy === 'custom') {
@@ -368,17 +484,17 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
         .filter((s) => (customAmountsAdd[s.sellerId] || 0) > 0)
         .map((s) => `${s.sellerName} (+${formatCurrency(customAmountsAdd[s.sellerId] || 0)})`)
         .join(', ');
-      desc = `Divisão individual de metas: cota de ${activeAbsentSeller?.sellerName} (${formatCurrency(targetToRedistribute)}) distribuída entre: ${parts || 'equipe'}.`;
+      desc = `Divisão individual de metas: cota de ${activeAbsentSeller.sellerName} (${formatCurrency(totalCustomAllocatedTarget || targetToRedistribute)}) distribuída entre: ${parts || 'equipe'}.`;
     } else if (strategy === 'single') {
       const targetSeller = recipientSellers.find((s) => s.sellerId === singleRecipientId);
-      desc = `Redistribuição de metas: cota de ${activeAbsentSeller?.sellerName} (${shareToRedistribute}%) transferida integralmente para ${targetSeller?.sellerName}.`;
+      desc = `Redistribuição de metas: cota de ${activeAbsentSeller.sellerName} (${formatCurrency(targetToRedistribute)}) transferida para ${targetSeller?.sellerName}.`;
     } else if (strategy === 'equal') {
-      desc = `Redistribuição de metas: cota de ${activeAbsentSeller?.sellerName} (${shareToRedistribute}%) dividida igualmente entre as ${recipientSellers.length} vendedoras presentes.`;
+      desc = `Redistribuição de metas: cota de ${activeAbsentSeller.sellerName} (${formatCurrency(targetToRedistribute)}) dividida igualmente entre as ${recipientSellers.length} presentes.`;
     } else {
-      desc = `Redistribuição de metas: cota de ${activeAbsentSeller?.sellerName} (${shareToRedistribute}%) redistribuída proporcionalmente entre a equipe presente.`;
+      desc = `Redistribuição de metas: cota de ${activeAbsentSeller.sellerName} (${formatCurrency(targetToRedistribute)}) redistribuída proporcionalmente entre a equipe presente.`;
     }
 
-    onApplyNewShares(previewShares, desc);
+    onApplyNewShares(finalShares, desc, vacationAdditions);
     setIsSuccessScreen(true);
   };
 
@@ -615,15 +731,20 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
                         R$
                       </span>
                       <input
-                        type="number"
-                        min="0"
-                        step="100"
-                        value={targetToRedistribute > 0 ? targetToRedistribute : ''}
+                        type="text"
+                        inputMode="numeric"
+                        value={rawTargetInput}
                         onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          setCustomAmountToRedistribute(val);
-                          setCustomAmountsAdd({});
+                          const text = e.target.value.replace(',', '.');
+                          setRawTargetInput(e.target.value);
+                          const parsed = parseFloat(text);
+                          if (!isNaN(parsed)) {
+                            setCustomAmountToRedistribute(Math.max(0, parsed));
+                          } else if (e.target.value.trim() === '') {
+                            setCustomAmountToRedistribute(0);
+                          }
                         }}
+                        placeholder={String(detectedVacationTarget || Math.round((activeAbsentSeller?.baseTarget || 0) * 0.5))}
                         className="w-36 sm:w-40 pl-8 pr-3 py-1.5 bg-white border border-amber-300 rounded-xl text-xs font-mono font-bold text-amber-950 shadow-2xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
                       />
                     </div>
@@ -641,7 +762,7 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
                       type="button"
                       onClick={() => {
                         setCustomAmountToRedistribute(detectedVacationTarget);
-                        setCustomAmountsAdd({});
+                        setRawTargetInput(String(detectedVacationTarget));
                       }}
                       className="px-2 py-0.5 bg-white hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-md font-bold transition cursor-pointer"
                     >
@@ -651,8 +772,9 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
                   <button
                     type="button"
                     onClick={() => {
-                      setCustomAmountToRedistribute(Math.round((activeAbsentSeller.baseTarget || 0) * 0.5));
-                      setCustomAmountsAdd({});
+                      const half = Math.round((activeAbsentSeller.baseTarget || 0) * 0.5);
+                      setCustomAmountToRedistribute(half);
+                      setRawTargetInput(String(half));
                     }}
                     className="px-2 py-0.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-md font-semibold transition cursor-pointer"
                   >
@@ -661,8 +783,9 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
                   <button
                     type="button"
                     onClick={() => {
-                      setCustomAmountToRedistribute(activeAbsentSeller.baseTarget || 0);
-                      setCustomAmountsAdd({});
+                      const full = activeAbsentSeller.baseTarget || 0;
+                      setCustomAmountToRedistribute(full);
+                      setRawTargetInput(String(full));
                     }}
                     className="px-2 py-0.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-md font-semibold transition cursor-pointer"
                   >
@@ -795,7 +918,7 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
                       <div className="flex items-center bg-white border border-slate-300 rounded-xl p-0.5 text-[11px] font-bold shadow-2xs">
                         <button
                           type="button"
-                          onClick={() => setCustomUnit('currency')}
+                          onClick={() => handleToggleUnit('currency')}
                           className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
                             customUnit === 'currency'
                               ? 'bg-indigo-600 text-white shadow-2xs'
@@ -806,7 +929,7 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
                         </button>
                         <button
                           type="button"
-                          onClick={() => setCustomUnit('percent')}
+                          onClick={() => handleToggleUnit('percent')}
                           className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
                             customUnit === 'percent'
                               ? 'bg-indigo-600 text-white shadow-2xs'
@@ -827,6 +950,15 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
                           Dividir Restante
                         </button>
                       )}
+
+                      <button
+                        type="button"
+                        onClick={handleAutoBalanceAndComplete}
+                        className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-[11px] font-bold transition cursor-pointer shadow-2xs"
+                        title="Auto-ajusta o saldo para fechar rigorosamente em 100%"
+                      >
+                        Auto-Equilibrar
+                      </button>
 
                       {totalCustomAllocatedTarget > 0 && (
                         <button
@@ -877,26 +1009,20 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
                                 + {customUnit === 'currency' ? 'R$' : '%'}
                               </span>
                               <input
-                                type="number"
-                                min="0"
-                                step={customUnit === 'currency' ? '100' : '0.1'}
+                                type="text"
+                                inputMode="decimal"
                                 value={
-                                  customUnit === 'currency'
+                                  rawSellerInputs[seller.sellerId] !== undefined
+                                    ? rawSellerInputs[seller.sellerId]
+                                    : customUnit === 'currency'
                                     ? currentAllocatedTarget > 0
-                                      ? currentAllocatedTarget
+                                      ? String(currentAllocatedTarget)
                                       : ''
                                     : currentAllocatedShare > 0
-                                    ? currentAllocatedShare
+                                    ? String(currentAllocatedShare)
                                     : ''
                                 }
-                                onChange={(e) => {
-                                  const val = parseFloat(e.target.value) || 0;
-                                  if (customUnit === 'currency') {
-                                    handleSetSellerAmount(seller.sellerId, val);
-                                  } else {
-                                    handleSetSellerShare(seller.sellerId, val);
-                                  }
-                                }}
+                                onChange={(e) => handleSellerInputChange(seller.sellerId, e.target.value)}
                                 placeholder="0"
                                 className="w-full pl-10 pr-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                               />
@@ -965,18 +1091,27 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
                         </div>
                         <button
                           type="button"
-                          onClick={handleDistributeRemainingEqually}
-                          className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-bold transition shrink-0 cursor-pointer"
+                          onClick={handleAutoBalanceAndComplete}
+                          className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-bold transition shrink-0 cursor-pointer shadow-xs"
                         >
-                          Completar Automaticamente
+                          Auto-Equilibrar Saldo
                         </button>
                       </div>
                     ) : (
-                      <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2 text-xs text-rose-950 font-medium">
-                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                        <span>
-                          Atenção: Você distribuiu <strong>{formatCurrency(Math.abs(remainingTargetToAllocate))}</strong> a mais do que o valor que faltava. Diminua os valores acima para fechar a conta.
-                        </span>
+                      <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between gap-2 text-xs text-rose-950 font-medium">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                          <span>
+                            Atenção: Você distribuiu <strong>{formatCurrency(Math.abs(remainingTargetToAllocate))}</strong> a mais do que a meta original.
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleAutoBalanceAndComplete}
+                          className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[11px] font-bold transition shrink-0 cursor-pointer shadow-xs"
+                        >
+                          Ajustar Cota Total
+                        </button>
                       </div>
                     )}
                   </div>
@@ -1106,9 +1241,14 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
         {!isSuccessScreen && (
           <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="text-xs text-slate-500">
-              {strategy === 'custom' && !isCustomAllocationComplete && (
+              {strategy === 'custom' && !isCustomAllocationComplete && totalCustomAllocatedTarget > 0 && (
+                <span className="text-indigo-700 font-medium">
+                  💡 Saldo parcial alocado ({formatCurrency(totalCustomAllocatedTarget)}). O sistema ajustará a cota cedente para equilibrar em 100%.
+                </span>
+              )}
+              {strategy === 'custom' && totalCustomAllocatedTarget === 0 && (
                 <span className="text-amber-700 font-medium">
-                  ⚠️ Distribua o valor total ({formatCurrency(targetToRedistribute)}) para liberar a confirmação.
+                  ⚠️ Preencha os valores adicionais nas vendedoras desejadas para aplicar.
                 </span>
               )}
             </div>
@@ -1125,15 +1265,23 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={!isPreviewValid || targetToRedistribute <= 0}
+                disabled={!isPreviewValid}
                 className={`px-5 py-2.5 text-xs font-bold rounded-xl transition shadow-md flex items-center gap-2 cursor-pointer ${
-                  isPreviewValid && targetToRedistribute > 0
+                  isPreviewValid
                     ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
                     : 'bg-slate-200 text-slate-400 cursor-not-allowed'
                 }`}
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Aplicar Redistribuição ({formatCurrency(targetToRedistribute)})</span>
+                <span>
+                  Aplicar Redistribuição (
+                  {formatCurrency(
+                    strategy === 'custom' && totalCustomAllocatedTarget > 0
+                      ? totalCustomAllocatedTarget
+                      : targetToRedistribute
+                  )}
+                  )
+                </span>
               </button>
             </div>
           </div>
