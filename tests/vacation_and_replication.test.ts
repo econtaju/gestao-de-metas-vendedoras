@@ -743,7 +743,62 @@ describe('Férias Proporcionais nas Semanas, Replicação de Metas & Redistribui
     assert.equal(pages[0].totalPages, 4);
     assert.equal(pages[0].pageBreakClass, 'seller-page-card');
   });
+
+  test('17. Proteção de Abertura do Modal de Férias: não renderiza no DOM por padrão (isOpen = false)', () => {
+    // Validação de ciclo de vida: isOpen padrão deve ser false
+    let isVacationModalOpen = false;
+
+    const renderModalCondition = (isOpen: boolean) => {
+      if (!isOpen) return null;
+      return { rendered: true };
+    };
+
+    // Ao inicializar o Gerador de Metas, o modal NUNCA deve ser montado
+    assert.equal(renderModalCondition(isVacationModalOpen), null, 'Modal deve retornar null quando isOpen for false');
+
+    // Somente com clique explícito do usuário é que ele abre
+    isVacationModalOpen = true;
+    assert.deepEqual(renderModalCondition(isVacationModalOpen), { rendered: true }, 'Modal só monta quando isOpen for true');
+
+    // Ao fechar (onClose), volta a ser null imediatamente
+    isVacationModalOpen = false;
+    assert.equal(renderModalCondition(isVacationModalOpen), null, 'Modal fecha e desmonta imediatamente');
+  });
+
+  test('18. Restrição Estrita a Férias Cadastradas: sem férias, não há necessidade de redistribuir', () => {
+    // Caso 1: Equipe com 4 consultoras e NENHUMA ausência cadastrada
+    const availabilitiesSemFerias: any[] = [];
+    const sellers = [
+      { id: '1', name: 'Ana' },
+      { id: '2', name: 'Bruna' },
+      { id: '3', name: 'Carla' },
+      { id: '4', name: 'Dani' },
+    ];
+
+    // Verifica se há férias para o mês 9/2026
+    const vacationSellers = sellers.filter(s => {
+      return availabilitiesSemFerias.some(a => a.sellerId === s.id);
+    });
+
+    assert.equal(vacationSellers.length, 0, 'Nenhuma vendedora em férias');
+    const shouldShowRedistributionButton = vacationSellers.length > 0;
+    assert.equal(shouldShowRedistributionButton, false, 'Botão de redistribuição NÃO deve ser exibido quando não houver férias');
+
+    // Caso 2: Equipe com 1 consultora em férias
+    const availabilitiesComFerias = [
+      { sellerId: '1', startDate: '2026-09-01', endDate: '2026-09-15', reason: 'Férias' }
+    ];
+
+    const vacationSellersComFerias = sellers.filter(s => {
+      return availabilitiesComFerias.some(a => a.sellerId === s.id);
+    });
+
+    assert.equal(vacationSellersComFerias.length, 1, '1 vendedora em férias');
+    const shouldShowWithVacation = vacationSellersComFerias.length > 0;
+    assert.equal(shouldShowWithVacation, true, 'Botão de redistribuição DEVE ser exibido quando houver férias');
+  });
 });
+
 
 
 

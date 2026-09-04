@@ -224,24 +224,18 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
             </button>
           )}
 
-          {onOpenVacationRedistributionModal && (
+          {onOpenVacationRedistributionModal && vacationSellersCount > 0 && (
             <button
               type="button"
               onClick={() => onOpenVacationRedistributionModal()}
-              title="Repartir / cobrir a cota de vendedoras em férias ou redistribuir metas individualmente"
-              className={`flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold rounded-lg shadow-2xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
-                vacationSellersCount > 0
-                  ? 'bg-amber-600 hover:bg-amber-700 text-white'
-                  : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300'
-              }`}
+              title="Repartir a cota de vendedoras em férias entre a equipe presente"
+              className="flex-1 sm:flex-none px-3 py-1.5 text-xs font-bold rounded-lg shadow-2xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer bg-amber-600 hover:bg-amber-700 text-white"
             >
               <Palmtree className="w-3.5 h-3.5" />
-              <span>🔀 Redistribuir Metas</span>
-              {vacationSellersCount > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.2 bg-white text-amber-900 rounded-full text-[10px] font-black">
-                  {vacationSellersCount}
-                </span>
-              )}
+              <span>Redistribuir Cota de Férias</span>
+              <span className="ml-0.5 px-1.5 py-0.2 bg-white text-amber-900 rounded-full text-[10px] font-black">
+                {vacationSellersCount}
+              </span>
             </button>
           )}
 
@@ -433,16 +427,6 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
                           >
                             Compensar
                           </button>
-                          {onOpenVacationRedistributionModal && (
-                            <button
-                              type="button"
-                              onClick={() => onOpenVacationRedistributionModal(seller.sellerId)}
-                              title={`Redistribuir cota / férias individualmente a partir de ${seller.sellerName}`}
-                              className="px-2 py-1 text-[11px] font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 hover:text-amber-950 rounded border border-amber-300 transition-colors cursor-pointer flex items-center gap-0.5"
-                            >
-                              <span>🔀 Distribuir</span>
-                            </button>
-                          )}
                         </div>
                       </td>
 
@@ -615,16 +599,6 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
                       >
                         Compensar
                       </button>
-                      {onOpenVacationRedistributionModal && (
-                        <button
-                          type="button"
-                          onClick={() => onOpenVacationRedistributionModal(seller.sellerId)}
-                          title={`Redistribuir cota / férias individualmente a partir de ${seller.sellerName}`}
-                          className="px-2 py-1 text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 rounded-lg border border-amber-300 transition cursor-pointer"
-                        >
-                          🔀 Distribuir
-                        </button>
-                      )}
                     </div>
                   </div>
 

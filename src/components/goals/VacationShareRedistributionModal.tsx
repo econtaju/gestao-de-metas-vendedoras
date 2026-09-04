@@ -498,21 +498,83 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
     setIsSuccessScreen(true);
   };
 
+  // Listener para fechar o modal ao pressionar a tecla Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  // Se não estiver aberto, não renderiza absolutamente nada
+  if (!isOpen) return null;
+
+  // Se for aberto mas não houver nenhuma vendedora em férias no período
+  if (absentSellers.length === 0) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
+        <div
+          className="bg-white rounded-3xl shadow-2xl max-w-md w-full my-6 overflow-hidden border border-slate-200 p-6 text-center space-y-4"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="w-14 h-14 bg-emerald-100 text-emerald-700 rounded-2xl flex items-center justify-center mx-auto shadow-xs">
+            <Palmtree className="w-7 h-7 text-emerald-600" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-slate-900">
+              Nenhuma Vendedora em Férias
+            </h3>
+            <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+              A redistribuição de cotas é utilizada exclusivamente quando há vendedoras em período de férias para suprir a ausência na unidade.
+            </p>
+            <p className="text-xs text-slate-500 mt-2">
+              Todas as consultoras de <strong>{branchName}</strong> estão 100% disponíveis para {monthName}/{year}. Não há necessidade de redistribuir metas.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-md transition cursor-pointer"
+          >
+            Entendido, Fechar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full my-6 overflow-hidden border border-slate-200">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full my-6 overflow-hidden border border-slate-200"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header do Modal */}
         <div className="p-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-indigo-500/20 text-indigo-300 rounded-xl border border-indigo-400/30">
-              <Sliders className="w-5 h-5" />
+              <Palmtree className="w-5 h-5 text-amber-400" />
             </div>
             <div>
               <h3 className="text-base font-bold tracking-tight">
-                Redistribuição de Metas da Equipe
+                Redistribuição de Metas por Férias
               </h3>
               <p className="text-xs text-slate-300">
-                Escolha individualmente quanto colocar a mais por vendedora para cobrir férias ou rebalancear a loja ({monthName}/{year})
+                Transfira a cota da vendedora ausente para suprir a meta da loja ({monthName}/{year})
               </p>
             </div>
           </div>
@@ -520,6 +582,7 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
           <button
             type="button"
             onClick={onClose}
+            title="Fechar (Esc)"
             className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -654,9 +717,8 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
               </label>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {sellersWithAvail.map((s) => {
+                {absentSellers.map((s) => {
                   const isSelected = s.sellerId === activeAbsentSeller?.sellerId;
-                  const hasVac = s.hasVacation;
                   return (
                     <button
                       key={s.sellerId}
@@ -668,41 +730,29 @@ export const VacationShareRedistributionModal: React.FC<VacationShareRedistribut
                       }}
                       className={`p-3 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
                         isSelected
-                          ? 'bg-indigo-50/90 border-indigo-500 ring-2 ring-indigo-200 shadow-xs'
-                          : hasVac
-                          ? 'bg-amber-50/60 border-amber-300 hover:border-amber-400'
-                          : 'bg-white border-slate-200 hover:border-slate-300'
+                          ? 'bg-amber-100 border-amber-500 ring-2 ring-amber-300 shadow-xs'
+                          : 'bg-amber-50/60 border-amber-300 hover:border-amber-400'
                       }`}
                     >
                       <div>
                         <div className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
                           <span>{s.sellerName}</span>
-                          {hasVac && (
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 text-[9px] font-bold">
-                              <Palmtree className="w-2.5 h-2.5 text-amber-700" />
-                              Férias
-                            </span>
-                          )}
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-amber-200 text-amber-950 text-[9px] font-bold">
+                            <Palmtree className="w-2.5 h-2.5 text-amber-700" />
+                            Férias
+                          </span>
                         </div>
                         <div className="text-[10px] text-slate-500 mt-0.5">
-                          Meta Atual: <strong className="text-slate-700">{formatCurrency(s.baseTarget)}</strong> ({s.baseShare.toFixed(1)}%)
+                          Meta Base: <strong className="text-slate-700">{formatCurrency(s.baseTarget)}</strong> ({s.baseShare.toFixed(1)}%)
                         </div>
                       </div>
                       <div className="text-right font-mono text-xs">
-                        {hasVac ? (
-                          <>
-                            <div className="font-bold text-amber-900">
-                              -{formatCurrency(s.uncoveredTarget)}
-                            </div>
-                            <div className="text-[10px] text-amber-700 font-bold">
-                              ({s.uncoveredShare}% vaga)
-                            </div>
-                          </>
-                        ) : (
-                          <div className="text-[10px] font-semibold text-indigo-700">
-                            Selecionar
-                          </div>
-                        )}
+                        <div className="font-bold text-amber-900">
+                          -{formatCurrency(s.uncoveredTarget)}
+                        </div>
+                        <div className="text-[10px] text-amber-700 font-bold">
+                          cota ausente ({s.uncoveredShare.toFixed(1)}%)
+                        </div>
                       </div>
                     </button>
                   );
