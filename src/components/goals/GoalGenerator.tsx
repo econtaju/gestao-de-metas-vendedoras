@@ -649,10 +649,63 @@ export const GoalGenerator: React.FC = () => {
     setTimeout(() => setSaveSuccessMessage(null), 3000);
   };
 
-  // Participação individual handlers
+  // Função para salvar MasterGoal imediatamente com os dados mais recentes de participação
+  const buildAndSaveMasterGoal = (customShares?: Record<string, number>) => {
+    const monthNames = [
+      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+    ];
+    const monthName = monthNames[selectedMonthNumber - 1];
+    const key = `${activeCompany.id}-${selectedBranchId}-${selectedYear}-${selectedMonthNumber}`;
+    const currentMaster = masterGoals[key] || existingMaster;
+
+    const sharesToPersist: Record<string, number> = customShares || (teamSummary.sellers || []).reduce((acc, s) => {
+      acc[s.sellerId] = s.officialSharePercentage;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const masterGoalToSave: MonthlyMasterGoal = {
+      id: currentMaster?.id || `goal-${activeCompany.id}-${selectedBranchId}-${selectedYear}-${selectedMonthNumber}`,
+      companyId: activeCompany.id,
+      branchId: selectedBranchId,
+      branchName: activeBranch?.name || 'Unidade Principal',
+      year: selectedYear,
+      monthNumber: selectedMonthNumber,
+      monthName,
+      monthlyTarget,
+      numberOfWeeks,
+      weeks,
+      totalWeight: weeks.reduce((acc, w) => acc + w.weightPercentage, 0),
+      isValid: weeklyWeightsValidation.isValid && teamSummary.isValid,
+      templateUsed: selectedTemplateId,
+      commissionRuleType: 'monthly',
+      status: currentMaster?.status || 'draft',
+      levels: calculatedLevels,
+      levelGrowthPercentages: levelGrowthRates,
+      sellerShares: sharesToPersist,
+      defaultSellerShares: activeCompany.defaultSellerShares || currentMaster?.defaultSellerShares,
+      changeLogs: currentMaster?.changeLogs || changeLogs,
+      updatedAt: new Date().toISOString(),
+      publishedAt: currentMaster?.publishedAt,
+    };
+
+    saveMasterGoal(masterGoalToSave);
+    return masterGoalToSave;
+  };
+
+  // Participação individual handlers com salvamento imediato e síncrono
   const handleSellerShareChange = (sellerId: string, newShare: number) => {
     const seller = branchSellers.find((s) => s.id === sellerId);
     updateSellerShare(sellerId, newShare, 'manual');
+
+    const currentShares: Record<string, number> = (teamSummary.sellers || []).reduce((acc, s) => {
+      acc[s.sellerId] = s.sellerId === sellerId ? newShare : s.officialSharePercentage;
+      return acc;
+    }, {} as Record<string, number>);
+    currentShares[sellerId] = newShare;
+
+    buildAndSaveMasterGoal(currentShares);
+
     if (seller) {
       addAuditLog('update_shares', `Participação de "${seller.name}" ajustada para ${newShare}%`, {
         sellerName: seller.name,
@@ -661,8 +714,45 @@ export const GoalGenerator: React.FC = () => {
     }
   };
 
+  const handleSaveSellerShare = (sellerId: string) => {
+    const seller = branchSellers.find((s) => s.id === sellerId);
+    const currentShares: Record<string, number> = (teamSummary.sellers || []).reduce((acc, s) => {
+      acc[s.sellerId] = s.officialSharePercentage;
+      return acc;
+    }, {} as Record<string, number>);
+
+    buildAndSaveMasterGoal(currentShares);
+
+    const sellerName = seller?.name || 'Vendedora';
+    addAuditLog(
+      'update_shares',
+      `Participação de "${sellerName}" (${currentShares[sellerId] || 0}%) salva no mês ${selectedMonthNumber}/${selectedYear}.`
+    );
+    setSaveSuccessMessage(`Participação de ${sellerName} salva com sucesso!`);
+    setTimeout(() => setSaveSuccessMessage(null), 3000);
+  };
+
+  const handleSaveAllSellerShares = () => {
+    const currentShares: Record<string, number> = (teamSummary.sellers || []).reduce((acc, s) => {
+      acc[s.sellerId] = s.officialSharePercentage;
+      return acc;
+    }, {} as Record<string, number>);
+
+    buildAndSaveMasterGoal(currentShares);
+
+    addAuditLog(
+      'update_shares',
+      `Todas as participações da equipe salvas no mês ${selectedMonthNumber}/${selectedYear}.`
+    );
+    setSaveSuccessMessage('Todas as participações da equipe foram salvas com sucesso!');
+    setTimeout(() => setSaveSuccessMessage(null), 3000);
+  };
+
   const handleRedistributeProportionally = (sellerId: string, newShare: number) => {
     autoRedistributeTeamParticipation(selectedBranchId, sellerId, newShare);
+    setTimeout(() => {
+      buildAndSaveMasterGoal();
+    }, 50);
     const seller = branchSellers.find((s) => s.id === sellerId);
     if (seller) {
       addAuditLog('update_shares', `Redistribuição proporcional a partir de "${seller.name}" (${newShare}%)`);
@@ -672,17 +762,23 @@ export const GoalGenerator: React.FC = () => {
   const handleSetEqualDistribution = () => {
     if (branchSellers.length === 0) return;
     const equalShare = Math.round((100 / branchSellers.length) * 10) / 10;
+    const equalShares: Record<string, number> = {};
     branchSellers.forEach((s) => {
+      equalShares[s.id] = equalShare;
       updateSellerShare(s.id, equalShare, 'adjusted');
     });
+    buildAndSaveMasterGoal(equalShares);
     addAuditLog('update_shares', `Distribuição igualitária aplicada (${equalShare}% para cada uma das ${branchSellers.length} vendedoras)`);
   };
 
   const handleApplyHistoricalShares = () => {
+    const histShares: Record<string, number> = {};
     branchSellers.forEach((s) => {
       const hist = s.historicalSharePercentage ?? (100 / branchSellers.length);
+      histShares[s.id] = hist;
       updateSellerShare(s.id, hist, 'historical');
     });
+    buildAndSaveMasterGoal(histShares);
     addAuditLog('update_shares', 'Participação histórica aplicada para a equipe comercial');
   };
 
@@ -1483,6 +1579,8 @@ export const GoalGenerator: React.FC = () => {
         onApplyHistoricalShares={handleApplyHistoricalShares}
         onSaveAsTeamDefault={handleSaveAsTeamDefault}
         onLoadTeamDefault={handleLoadTeamDefault}
+        onSaveSellerShare={handleSaveSellerShare}
+        onSaveAllSellerShares={handleSaveAllSellerShares}
         onOpenReplicateModal={() => setIsReplicateModalOpen(true)}
         onOpenVacationRedistributionModal={handleOpenVacationRedistributionModal}
         hasSavedTeamDefault={Boolean(activeCompany.defaultSellerShares && Object.keys(activeCompany.defaultSellerShares).length > 0)}

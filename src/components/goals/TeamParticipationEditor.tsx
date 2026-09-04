@@ -15,6 +15,8 @@ import {
   Star,
   Zap,
   Palmtree,
+  Save,
+  Check,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { TeamParticipationSummary, Seller } from '../../types';
@@ -30,6 +32,8 @@ interface TeamParticipationEditorProps {
   onLoadTeamDefault?: () => void;
   onOpenReplicateModal?: () => void;
   onOpenVacationRedistributionModal?: (sellerId?: string) => void;
+  onSaveSellerShare?: (sellerId: string) => void;
+  onSaveAllSellerShares?: () => void;
   hasSavedTeamDefault?: boolean;
   monthlyTarget: number;
   monthNumber?: number;
@@ -46,6 +50,8 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
   onLoadTeamDefault,
   onOpenReplicateModal,
   onOpenVacationRedistributionModal,
+  onSaveSellerShare,
+  onSaveAllSellerShares,
   hasSavedTeamDefault = false,
   monthlyTarget = 0,
   monthNumber = 9,
@@ -57,6 +63,29 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
   const validationMessage = summary?.validationMessage;
   const safeSellers = Array.isArray(summary?.sellers) ? summary.sellers : [];
   const diff = Math.round((100 - totalSharePercentage) * 10) / 10;
+
+  const [savedSellers, setSavedSellers] = React.useState<Record<string, boolean>>({});
+  const [allSaved, setAllSaved] = React.useState<boolean>(false);
+
+  const handleSaveSingle = (sellerId: string) => {
+    if (onSaveSellerShare) {
+      onSaveSellerShare(sellerId);
+    }
+    setSavedSellers((prev) => ({ ...prev, [sellerId]: true }));
+    setTimeout(() => {
+      setSavedSellers((prev) => ({ ...prev, [sellerId]: false }));
+    }, 2500);
+  };
+
+  const handleSaveAll = () => {
+    if (onSaveAllSellerShares) {
+      onSaveAllSellerShares();
+    }
+    setAllSaved(true);
+    setTimeout(() => {
+      setAllSaved(false);
+    }, 2500);
+  };
 
   const mStr = String(monthNumber || 9).padStart(2, '0');
   const yr = year || 2026;
@@ -227,6 +256,22 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
               <span>Replicar p/ Meses</span>
             </button>
           )}
+
+          {onSaveAllSellerShares && (
+            <button
+              type="button"
+              onClick={handleSaveAll}
+              title="Salvar imediatamente todas as porcentagens de participação da equipe"
+              className={`flex-1 sm:flex-none px-3.5 py-1.5 text-xs font-bold rounded-lg shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                allSaved
+                  ? 'bg-emerald-600 text-white ring-2 ring-emerald-300'
+                  : 'bg-emerald-700 hover:bg-emerald-800 text-white'
+              }`}
+            >
+              {allSaved ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+              <span>{allSaved ? 'Salvo ✓' : 'Salvar Participações'}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -244,12 +289,13 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
                 <th className="py-3 px-3 text-right">Ticket Médio</th>
                 <th className="py-3 px-3 text-right">Vendas Necessárias</th>
                 <th className="py-3 px-3 text-center">Auto-Ajuste</th>
+                <th className="py-3 px-3 text-center bg-indigo-50/60 text-indigo-900 font-bold">Salvar</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {safeSellers.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center bg-slate-50/50">
+                  <td colSpan={9} className="py-8 text-center bg-slate-50/50">
                     <div className="flex flex-col items-center justify-center space-y-2">
                       <div className="p-2.5 bg-purple-50 text-purple-600 rounded-full">
                         <Users className="w-6 h-6" />
@@ -387,6 +433,32 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
                           Compensar
                         </button>
                       </td>
+
+                      {/* Botão de Salvar Individual */}
+                      <td className="py-3 px-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleSaveSingle(seller.sellerId)}
+                          title={`Salvar imediatamente a participação de ${seller.sellerName}`}
+                          className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 mx-auto cursor-pointer shadow-2xs ${
+                            savedSellers[seller.sellerId]
+                              ? 'bg-emerald-600 text-white ring-2 ring-emerald-300'
+                              : 'bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-300 hover:border-emerald-300'
+                          }`}
+                        >
+                          {savedSellers[seller.sellerId] ? (
+                            <>
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Salvo</span>
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-3.5 h-3.5" />
+                              <span>Salvar</span>
+                            </>
+                          )}
+                        </button>
+                      </td>
                     </tr>
                   );
                 })
@@ -426,6 +498,7 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
                   )}{' '}
                   vendas
                 </td>
+                <td className="py-3 px-3 text-center">-</td>
                 <td className="py-3 px-3 text-center">-</td>
               </tr>
             </tfoot>
@@ -499,14 +572,38 @@ export const TeamParticipationEditor: React.FC<TeamParticipationEditorProps> = (
                         {renderOriginBadge(seller.shareOriginType)}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => onRedistributeProportionally(seller.sellerId, seller.officialSharePercentage)}
-                      title="Compensar participação"
-                      className="px-2.5 py-1 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 transition cursor-pointer"
-                    >
-                      Compensar
-                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleSaveSingle(seller.sellerId)}
+                        title={`Salvar imediatamente a participação de ${seller.sellerName}`}
+                        className={`px-2 py-1 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer shadow-2xs ${
+                          savedSellers[seller.sellerId]
+                            ? 'bg-emerald-600 text-white ring-1 ring-emerald-300'
+                            : 'bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-300'
+                        }`}
+                      >
+                        {savedSellers[seller.sellerId] ? (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Salvo</span>
+                          </>
+                        ) : (
+                          <>
+                            <Save className="w-3.5 h-3.5" />
+                            <span>Salvar</span>
+                          </>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRedistributeProportionally(seller.sellerId, seller.officialSharePercentage)}
+                        title="Compensar participação"
+                        className="px-2 py-1 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 transition cursor-pointer"
+                      >
+                        Compensar
+                      </button>
+                    </div>
                   </div>
 
                   <div className="flex items-center justify-between text-xs pt-1.5 border-t border-slate-200/70">

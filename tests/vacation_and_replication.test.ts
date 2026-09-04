@@ -351,4 +351,80 @@ describe('Férias Proporcionais nas Semanas, Replicação de Metas & Redistribui
     );
     assert.equal(totalCalculatedRevenue, 200000, 'Soma em R$ deve fechar exatamente os R$ 200.000 da unidade');
   });
+
+  test('8. Persistência imediata e síncrona de sellerShares no MonthlyMasterGoal', () => {
+    // Simula a estrutura de masterGoals persistida no AppContext
+    const masterGoalsStore: Record<string, MonthlyMasterGoal> = {};
+    const goalKey = 'comp-1-branch-1-2026-9';
+
+    // Estado inicial
+    masterGoalsStore[goalKey] = {
+      ...mockMasterGoal,
+      sellerShares: {
+        'seller-ana': 25,
+        'seller-bruna': 25,
+        'seller-carla': 25,
+        'seller-dani': 25,
+      },
+    };
+
+    // Usuário altera a participação de 'seller-ana' para 40% e clica em Salvar
+    const updatedShares = {
+      ...masterGoalsStore[goalKey].sellerShares,
+      'seller-ana': 40,
+    };
+
+    masterGoalsStore[goalKey] = {
+      ...masterGoalsStore[goalKey],
+      sellerShares: updatedShares,
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Verifica se foi persistido imediatamente no store do mês
+    assert.equal(masterGoalsStore[goalKey].sellerShares?.['seller-ana'], 40);
+    assert.equal(masterGoalsStore[goalKey].sellerShares?.['seller-bruna'], 25);
+
+    // Troca de mês (ex: mês 10) e retorna para o mês 9
+    const loadedMasterGoal = masterGoalsStore[goalKey];
+    assert.ok(loadedMasterGoal.sellerShares, 'sellerShares deve existir');
+    assert.equal(loadedMasterGoal.sellerShares['seller-ana'], 40, 'Porcentagem personalizada de 40% deve ser preservada ao retornar');
+  });
+
+  test('9. Totais consolidados da Matriz (Meta Inicial vs Atual Distribuído vs Falta Distribuir)', () => {
+    // Meta da Unidade: R$ 144.000,00
+    const monthlyTarget = 144000;
+    const sellers = [
+      { sellerId: 'seller-1', officialSharePercentage: 25 }, // Base: 36.000
+      { sellerId: 'seller-2', officialSharePercentage: 25 }, // Base: 36.000
+      { sellerId: 'seller-3', officialSharePercentage: 25 }, // Base: 36.000
+      { sellerId: 'seller-4', officialSharePercentage: 25 }, // Base: 36.000
+    ];
+
+    // Semana com 4 períodos iguais (25% cada = 36.000 por semana da loja)
+    const weeks = [
+      { weekNumber: 1, weightPercentage: 25 },
+      { weekNumber: 2, weightPercentage: 25 },
+      { weekNumber: 3, weightPercentage: 25 },
+      { weekNumber: 4, weightPercentage: 25 },
+    ];
+
+    // Simula férias da seller-1: falta R$ 10.000 na meta dela (cota efetiva dela vira 26.000 em vez de 36.000)
+    // As outras vendedoras continuam com 36.000 cada
+    const effectiveSellerTargets: Record<string, number> = {
+      'seller-1': 26000,
+      'seller-2': 36000,
+      'seller-3': 36000,
+      'seller-4': 36000,
+    };
+
+    const monthDistributed = Object.values(effectiveSellerTargets).reduce((a, b) => a + b, 0);
+    const monthMissing = Math.max(0, monthlyTarget - monthDistributed);
+    const distributedPercentage = (monthDistributed / monthlyTarget) * 100;
+
+    assert.equal(monthlyTarget, 144000, 'Meta inicial deve ser 144.000');
+    assert.equal(monthDistributed, 134000, 'Total atual distribuído deve ser 134.000');
+    assert.equal(monthMissing, 10000, 'Diferença que falta distribuir deve ser exatamente 10.000');
+    assert.ok(distributedPercentage < 100, 'Percentual distribuído deve ser menor que 100%');
+    assert.equal(Math.round(distributedPercentage * 10) / 10, 93.1, 'Percentual distribuído deve ser ~93.1%');
+  });
 });

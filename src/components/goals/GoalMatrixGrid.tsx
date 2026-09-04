@@ -50,12 +50,20 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
     seniorityLevel?: string;
   } | null>(null);
 
-  // Calcula o total de cotas descobertas por férias na unidade
-  const totalUncoveredVacationAmount = React.useMemo(() => {
-    let totalUncovered = 0;
+  // Totais consolidados da matriz: Meta Inicial, Distribuído Efetivo e Falta Distribuir (Férias)
+  const matrixTotals = React.useMemo(() => {
+    const weekDistributed: Record<number, number> = {};
+    const weekBase: Record<number, number> = {};
+    const weekMissing: Record<number, number> = {};
+
+    safeWeeks.forEach((w) => {
+      weekBase[w.weekNumber] = Math.round(monthlyTarget * (w.weightPercentage / 100));
+      weekDistributed[w.weekNumber] = 0;
+    });
+
+    let monthDistributed = 0;
+
     safeSellers.forEach((seller) => {
-      const baseMonthly = Math.round(monthlyTarget * (seller.officialSharePercentage / 100));
-      let effectiveSellerMonthly = 0;
       safeWeeks.forEach((week) => {
         const mStr = String(monthNumber || 9).padStart(2, '0');
         const startDateStr =
@@ -72,11 +80,31 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
         const baseWeek = Math.round(
           monthlyTarget * (week.weightPercentage / 100) * (seller.officialSharePercentage / 100)
         );
-        effectiveSellerMonthly += Math.round(baseWeek * avail.factor);
+        const adjusted = Math.round(baseWeek * avail.factor);
+
+        weekDistributed[week.weekNumber] = (weekDistributed[week.weekNumber] || 0) + adjusted;
+        monthDistributed += adjusted;
       });
-      totalUncovered += Math.max(0, baseMonthly - effectiveSellerMonthly);
     });
-    return totalUncovered;
+
+    safeWeeks.forEach((w) => {
+      const diff = weekBase[w.weekNumber] - (weekDistributed[w.weekNumber] || 0);
+      weekMissing[w.weekNumber] = Math.max(0, diff);
+    });
+
+    const monthMissing = Math.max(0, monthlyTarget - monthDistributed);
+    const distributedSharePercentage = monthlyTarget > 0 ? (monthDistributed / monthlyTarget) * 100 : 0;
+
+    return {
+      weekBase,
+      weekDistributed,
+      weekMissing,
+      monthBase: monthlyTarget,
+      monthDistributed,
+      monthMissing,
+      distributedSharePercentage,
+      hasDeficit: monthMissing > 0,
+    };
   }, [safeSellers, safeWeeks, monthlyTarget, monthNumber, year, availabilities, workingDaysSettings]);
 
   return (
@@ -105,7 +133,7 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
       </div>
 
       {/* Banner Informativo de Cota de Férias a Cobrir */}
-      {totalUncoveredVacationAmount > 0 && (
+      {matrixTotals.hasDeficit && (
         <div className="mx-5 mt-4 p-3.5 bg-amber-50 border border-amber-300/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs animate-in fade-in duration-150">
           <div className="flex items-center gap-2.5">
             <div className="p-2 bg-amber-100 text-amber-900 rounded-xl shrink-0">
@@ -113,7 +141,7 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
             </div>
             <div>
               <span className="font-bold text-amber-950 block text-xs sm:text-sm">
-                Cota de Férias a Cobrir: {formatCurrency(totalUncoveredVacationAmount)}
+                Cota de Férias a Cobrir: {formatCurrency(matrixTotals.monthMissing)}
               </span>
               <span className="text-amber-900/80 text-[11px] block mt-0.5">
                 Vendedoras da unidade estão em período de férias. Você pode repartir essa diferença entre as vendedoras presentes para manter a meta da loja em 100%.
@@ -334,32 +362,140 @@ export const GoalMatrixGrid: React.FC<GoalMatrixGridProps> = ({
               )}
             </tbody>
             <tfoot>
-              {/* Linha de Totais da Semana */}
-              <tr className="bg-slate-900 text-white font-bold text-xs border-t-2 border-slate-700">
-                <td className="py-3.5 px-4 uppercase tracking-wider">Total da Unidade</td>
-                <td className="py-3.5 px-3 text-center font-mono text-emerald-400 bg-slate-950">
-                  {(teamSummary?.totalSharePercentage || 100).toFixed(1)}%
-                </td>
-                <td className="py-3.5 px-4 text-right font-mono text-amber-300 text-sm bg-slate-950">
-                  {formatCurrency(monthlyTarget)}
-                </td>
-                {safeWeeks.map((week) => {
-                  const weekTotalTarget = Math.round(monthlyTarget * (week.weightPercentage / 100));
-                  return (
-                    <td key={week.weekNumber} className="py-3.5 px-4 text-right font-mono border-l border-slate-800">
-                      <div className="text-emerald-400 font-bold text-xs">
-                        {formatCurrency(weekTotalTarget)}
-                      </div>
-                      <div className="text-[10px] text-slate-400 font-normal">
-                        ({week.weightPercentage}% da loja)
-                      </div>
+              {!matrixTotals.hasDeficit ? (
+                /* Linha de Totais da Semana (Sem Déficit de Férias) */
+                <tr className="bg-slate-900 text-white font-bold text-xs border-t-2 border-slate-700">
+                  <td className="py-3.5 px-4 uppercase tracking-wider">Total da Unidade</td>
+                  <td className="py-3.5 px-3 text-center font-mono text-emerald-400 bg-slate-950">
+                    {(teamSummary?.totalSharePercentage || 100).toFixed(1)}%
+                  </td>
+                  <td className="py-3.5 px-4 text-right font-mono text-amber-300 text-sm bg-slate-950">
+                    {formatCurrency(monthlyTarget)}
+                  </td>
+                  {safeWeeks.map((week) => {
+                    const weekTotalTarget = matrixTotals.weekBase[week.weekNumber] || 0;
+                    return (
+                      <td key={week.weekNumber} className="py-3.5 px-4 text-right font-mono border-l border-slate-800">
+                        <div className="text-emerald-400 font-bold text-xs">
+                          {formatCurrency(weekTotalTarget)}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-normal">
+                          ({week.weightPercentage}% da loja)
+                        </div>
+                      </td>
+                    );
+                  })}
+                  <td className="py-3.5 px-3 text-center border-l border-slate-800 bg-slate-950 text-slate-400">
+                    -
+                  </td>
+                </tr>
+              ) : (
+                /* 3 Linhas Discriminadas: Meta Inicial, Total Atual Distribuído e Falta Distribuir */
+                <>
+                  {/* 1. Meta Inicial Planejada */}
+                  <tr className="bg-slate-900 text-slate-300 font-medium text-xs border-t-2 border-slate-700">
+                    <td className="py-3 px-4 uppercase tracking-wider text-slate-200 font-bold flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-slate-400 inline-block"></span>
+                      <span>🎯 Meta Inicial Planejada</span>
                     </td>
-                  );
-                })}
-                <td className="py-3.5 px-3 text-center border-l border-slate-800 bg-slate-950 text-slate-400">
-                  -
-                </td>
-              </tr>
+                    <td className="py-3 px-3 text-center font-mono text-slate-300 bg-slate-950">
+                      100.0%
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono text-white font-bold text-sm bg-slate-950">
+                      {formatCurrency(matrixTotals.monthBase)}
+                    </td>
+                    {safeWeeks.map((week) => (
+                      <td key={week.weekNumber} className="py-3 px-4 text-right font-mono border-l border-slate-800 text-slate-300">
+                        <div className="font-semibold text-xs text-slate-200">
+                          {formatCurrency(matrixTotals.weekBase[week.weekNumber] || 0)}
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          ({week.weightPercentage}% da loja)
+                        </div>
+                      </td>
+                    ))}
+                    <td className="py-3 px-3 text-center border-l border-slate-800 bg-slate-950 text-slate-500">
+                      -
+                    </td>
+                  </tr>
+
+                  {/* 2. Total Atual Distribuído (com Férias) */}
+                  <tr className="bg-slate-800 text-white font-semibold text-xs border-t border-slate-700">
+                    <td className="py-3 px-4 uppercase tracking-wider text-emerald-300 font-bold flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
+                      <span>👥 Total Atual Distribuído</span>
+                    </td>
+                    <td className="py-3 px-3 text-center font-mono text-emerald-400 bg-slate-950 font-bold">
+                      {matrixTotals.distributedSharePercentage.toFixed(1)}%
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono text-emerald-400 font-bold text-sm bg-slate-950">
+                      {formatCurrency(matrixTotals.monthDistributed)}
+                    </td>
+                    {safeWeeks.map((week) => (
+                      <td key={week.weekNumber} className="py-3 px-4 text-right font-mono border-l border-slate-800">
+                        <div className="text-emerald-400 font-bold text-xs">
+                          {formatCurrency(matrixTotals.weekDistributed[week.weekNumber] || 0)}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-normal">
+                          {matrixTotals.weekBase[week.weekNumber] > 0
+                            ? `${(((matrixTotals.weekDistributed[week.weekNumber] || 0) / matrixTotals.weekBase[week.weekNumber]) * 100).toFixed(0)}% da semana`
+                            : '100%'}
+                        </div>
+                      </td>
+                    ))}
+                    <td className="py-3 px-3 text-center border-l border-slate-800 bg-slate-950 text-slate-400">
+                      -
+                    </td>
+                  </tr>
+
+                  {/* 3. Falta Distribuir (Diferença de Férias) */}
+                  <tr className="bg-amber-950/90 text-amber-200 font-bold text-xs border-t-2 border-amber-600/70 shadow-inner">
+                    <td className="py-3 px-4 uppercase tracking-wider text-amber-300 flex items-center gap-2">
+                      <Palmtree className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>🌴 Falta Distribuir (Diferença de Férias)</span>
+                    </td>
+                    <td className="py-3 px-3 text-center font-mono text-amber-300 bg-amber-950">
+                      -{(100 - matrixTotals.distributedSharePercentage).toFixed(1)}%
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono text-amber-300 text-sm bg-amber-950">
+                      <span className="text-[10px] text-amber-400 block font-normal uppercase tracking-wider">Diferença</span>
+                      <span>Falta: {formatCurrency(matrixTotals.monthMissing)}</span>
+                    </td>
+                    {safeWeeks.map((week) => {
+                      const weekDiff = matrixTotals.weekMissing[week.weekNumber] || 0;
+                      return (
+                        <td key={week.weekNumber} className="py-3 px-4 text-right font-mono border-l border-amber-900/60 bg-amber-950/80">
+                          {weekDiff > 0 ? (
+                            <>
+                              <div className="text-amber-300 font-bold text-xs">
+                                -{formatCurrency(weekDiff)}
+                              </div>
+                              <div className="text-[10px] text-amber-400/80 font-normal">
+                                cota de férias
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-slate-400 text-xs font-normal">0% falta</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className="py-3 px-3 text-center border-l border-amber-900/60 bg-amber-950">
+                      {onOpenVacationRedistributionModal && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenVacationRedistributionModal()}
+                          className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-amber-950 rounded-lg text-[10px] font-bold transition shadow-xs cursor-pointer inline-flex items-center gap-1"
+                          title="Redistribuir o valor que falta entre as vendedoras ativas"
+                        >
+                          <Palmtree className="w-3 h-3" />
+                          <span>Redistribuir</span>
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                </>
+              )}
             </tfoot>
           </table>
         </div>
